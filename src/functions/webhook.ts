@@ -96,11 +96,17 @@ app.http('webhook', {
         }
       }
 
-      // Add markers to run note description so we can swap section out while persisting previous description
-      // Add LLM call to analyze the run data and prepare new description
+      // 1) Ask your LLM for the summary (string), e.g. "Easy run" or "Tempo 4×1k ..."
+      const llmSummary = 'Easy run'; // <- today hard-coded; later replace with LLM output
+
+      // 2) Normalize
       const current = act.description || '';
-      const newDescription = 'Easy run\n --from RunNote \n';
-      const next = `${newDescription} ${current} `;
+      const next = applyRunNoteTopLLMSafe(current, llmSummary);
+
+      // 3) Only update if changed (retry with refresh as you already do)
+      if (next !== current) {
+        await updateActivityDescription(activityId, next, rec.access_token);
+      }
 
       // Update if changed (retry if 401/403)
       try {
@@ -126,3 +132,33 @@ app.http('webhook', {
     }
   },
 });
+
+// Ensures exactly one RunNote line at the top using the provided summary.
+// - Strips ANY existing line that ends with `--from RunNote` (case/space tolerant)
+// - Sanitizes the LLM summary to a single line
+// - Preserves all other lines (e.g., COROS), in original order
+export function applyRunNoteTopLLMSafe(
+  existing: string | null | undefined,
+  llmSummary: string, // e.g., "Tempo: 4×1k @ 6:10/mi (R90s)"
+  marker = '--from RunNote'
+): string {
+  const desc = (existing ?? '').replace(/\r\n/g, '\n');
+
+  // Collapse the LLM summary to one line (no newlines, no trailing spaces)
+  const summaryLine = llmSummary.replace(/\s*\n+\s*/g, ' ').trim();
+
+  // Build the canonical RunNote line we want to appear once
+  const runNoteLine = `${summaryLine} ${marker}`;
+
+  // Match any line that ends with the marker (allow varying spaces/case)
+  const endsWithMarker = new RegExp(`\\s*--\\s*from\\s*RunNote\\s*$`, 'i');
+
+  // Keep every non-empty line that is NOT a previous RunNote line
+  const kept = desc
+    .split(/\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.length > 0 && !endsWithMarker.test(l.trim()));
+
+  // Assemble final: canonical RunNote line on top, others below
+  return kept.length === 0 ? runNoteLine : [runNoteLine, ...kept].join('\n');
+}

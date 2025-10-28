@@ -55,6 +55,16 @@ app.http('webhook', {
     req: HttpRequest,
     ctx: InvocationContext
   ): Promise<HttpResponseInit> => {
+    // Strava verification (GET)
+    if (req.method === 'GET') {
+      const verify = req.query.get('hub.verify_token');
+      const challenge = req.query.get('hub.challenge');
+      if (verify !== process.env.VerifyToken)
+        return { status: 403, body: 'Invalid verify token' };
+      return { status: 200, jsonBody: { 'hub.challenge': challenge } };
+    }
+
+    // Webhook event (POST)
     try {
       const body = (await req.json()) as any;
 

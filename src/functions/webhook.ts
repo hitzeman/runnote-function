@@ -13,6 +13,41 @@ import {
 } from '../shared/strava';
 import { TokenRow } from '../shared/tokenStore';
 
+/**
+ * Azure Function: webhook
+ *
+ * This function handles incoming **Strava webhook events** that notify RunNote when
+ * an athlete performs certain actions — such as creating, updating, or deleting activities.
+ *
+ * Currently, it listens for **activity creation events** (aspect_type = "create")
+ * and performs the following workflow:
+ *
+ * 1. **Receive Strava webhook payload** — triggered automatically by Strava when
+ *    a connected athlete uploads a new activity.
+ *
+ * 2. **Validate the event type** — ignores non-activity or non-create events for now.
+ *
+ * 3. **Fetch athlete tokens** — uses `ensureValidTokens()` to retrieve or refresh the
+ *    athlete’s access token (refreshing via `refreshTokens()` if expired or unauthorized).
+ *
+ * 4. **Retrieve activity details** — calls `getActivity()` from the Strava API.
+ *    If access is denied (401/403), it retries with a fresh token.
+ *
+ * 5. **Generate and update description** — appends a RunNote marker or note to the
+ *    activity’s description (later, this will include LLM-generated analysis text).
+ *
+ * 6. **Save the updated activity** — calls `updateActivityDescription()` to push
+ *    the new description back to Strava.
+ *
+ * 7. **Error handling** — logs any issues but always returns HTTP 200 to
+ *    acknowledge receipt, since Strava expects a 200 response for all webhook events.
+ *
+ * Usage:
+ * - Automatically called by Strava via POST when an athlete uploads a new activity.
+ * - Ensures tokens remain valid and updates the Strava activity description
+ *   with RunNote’s generated summary or tag.
+ */
+
 app.http('webhook', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',

@@ -13,6 +13,48 @@ import {
 } from '../shared/strava';
 import { TokenRow } from '../shared/tokenStore';
 
+import { Activity } from '../models/activity.model';
+import { openai } from '../shared/ai';
+
+function fmtPaceFromMs(ms: number | undefined) {
+  if (!ms || ms <= 0) return null;
+  const paceSecPerKm = 1000 / ms; // seconds per km
+  const m = Math.floor(paceSecPerKm / 60);
+  const s = Math.round(paceSecPerKm % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${m}:${s}/km`;
+}
+
+export async function getRunNoteSummaryFromOpenAI(
+  act: Activity
+): Promise<string> {
+  const sys = `You are a running coach who summarizes structured workouts from Strava activity data. 
+  Your athletes follow Jack Daniels training plans and workouts which are usually broken up into:
+  R pace for repeition
+  I pace for interval
+  T pace for threshold
+  M pace for marathon
+  E pace for easy`;
+
+  const usr = `Activity JSON:
+${JSON.stringify(act, null, 2)}
+
+Rules:
+- Use miles and min/mi pace.
+- Include workout structure (e.g., 3x1mi at T pace, 5K T pace, 5x1k I at /mi pace, easy run).
+- Be concise: one descriptive line only.`;
+
+  const res = await openai.responses.create({
+    model: 'gpt-4.1-mini',
+    input: [
+      { role: 'system', content: sys },
+      { role: 'user', content: usr },
+    ],
+  });
+
+  return res.output_text?.trim() || 'Easy run';
+}
 /**
  * Azure Function: webhook
  *
@@ -66,7 +108,7 @@ app.http('webhook', {
 
     // Webhook event (POST)
     try {
-      const body = (await req.json()) as any;
+      const body = (await req.json()) as any; // add model
 
       // Only handle "create" to start (add "update" later if you want)
       if (body?.object_type !== 'activity' || body?.aspect_type !== 'create') {
@@ -97,32 +139,52 @@ app.http('webhook', {
       }
 
       // 1) Ask your LLM for the summary (string), e.g. "Easy run" or "Tempo 4×1k ..."
-      const llmSummary = 'Easy run'; // <- today hard-coded; later replace with LLM output
+      //const llmSummary = 'Easy run'; // <- today hard-coded; later replace with LLM output
+
+      const llmSummary = await getRunNoteSummaryFromOpenAI(act);
 
       // 2) Normalize
       const current = act.description || '';
       const next = applyRunNoteTopLLMSafe(current, llmSummary);
 
       // 3) Only update if changed (retry with refresh as you already do)
-      if (next !== current) {
-        await updateActivityDescription(activityId, next, rec.access_token);
-      }
+      // if (next !== current) {
+      //   await updateActivityDescription(activityId, next, rec.access_token);
+      // }
 
       // Update if changed (retry if 401/403)
-      try {
-        await updateActivityDescription(activityId, next, rec.access_token);
-      } catch (e) {
-        const err = e as AxiosError;
-        if (
-          err.response &&
-          (err.response.status === 401 || err.response.status === 403)
-        ) {
-          rec = await refreshTokens(rec);
+      // try {
+      //   await updateActivityDescription(activityId, next, rec.access_token);
+      // } catch (e) {
+      //   const err = e as AxiosError;
+      //   if (
+      //     err.response &&
+      //     (err.response.status === 401 || err.response.status === 403)
+      //   ) {
+      //     rec = await refreshTokens(rec);
+      //     await updateActivityDescription(activityId, next, rec.access_token);
+      //   } else {
+      //     throw e;
+      //   }
+      // }
+
+      if (next !== current) {
+        try {
           await updateActivityDescription(activityId, next, rec.access_token);
-        } else {
-          throw e;
+        } catch (e) {
+          // If token expired, refresh once and retry
+          if (
+            (e as any)?.response?.status === 401 ||
+            (e as any)?.response?.status === 403
+          ) {
+            rec = await refreshTokens(rec);
+            await updateActivityDescription(activityId, next, rec.access_token);
+          } else {
+            throw e;
+          }
         }
       }
+
       ctx.log(`Activity ${activityId} updated with RunNote`);
 
       return { status: 200 };
@@ -160,5 +222,9 @@ export function applyRunNoteTopLLMSafe(
     .filter((l) => l.length > 0 && !endsWithMarker.test(l.trim()));
 
   // Assemble final: canonical RunNote line on top, others below
-  return kept.length === 0 ? runNoteLine : [runNoteLine, ...kept].join('\n');
+  if (kept.length === 0) {
+    return `${runNoteLine}\n`;
+  } else {
+    return `${runNoteLine}\n${kept.join('\n')}`;
+  }
 }

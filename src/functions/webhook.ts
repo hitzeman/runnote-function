@@ -12,49 +12,120 @@ import {
   updateActivityDescription,
 } from '../shared/strava';
 import { TokenRow } from '../shared/tokenStore';
-
 import { Activity } from '../models/activity.model';
 import { openai } from '../shared/ai';
 
-function fmtPaceFromMs(ms: number | undefined) {
-  if (!ms || ms <= 0) return null;
-  const paceSecPerKm = 1000 / ms; // seconds per km
-  const m = Math.floor(paceSecPerKm / 60);
-  const s = Math.round(paceSecPerKm % 60)
-    .toString()
-    .padStart(2, '0');
-  return `${m}:${s}/km`;
+// OpenAI System Prompt for Run Analysis
+const SYSTEM_PROMPT = `You analyze running workouts from Strava activity data to classify them as Tempo (T) or Easy (E) runs.
+
+TEMPO RUN DETECTION:
+1. Examine the "laps" array for contiguous laps that form a workout block
+2. A tempo block has ALL these characteristics:
+   - Heart rate sustained at 150+ bpm (check average_heartrate)
+   - Pace zone is 3 or 4 (check pace_zone field)
+   - Duration: 15-40 minutes total
+   - Significantly faster than warmup/cooldown laps
+3. If found, calculate the tempo block:
+   - Sum moving_time and distance for those laps
+   - Convert meters to miles: divide by 1609.344
+   - Calculate pace: seconds_per_mile = total_seconds / total_miles
+   - Convert to MM:SS format
+
+EASY RUN DETECTION:
+1. If no tempo block exists, it's an easy run
+2. Easy runs have these patterns:
+   - Heart rate mostly in zones 1-2 (typically 115-145 bpm)
+   - No sustained elevated HR (no blocks with 150+ bpm sustained)
+   - Consistent pace throughout, no clear "workout block"
+   - Max HR may briefly spike but doesn't sustain high
+3. For easy runs, use overall activity stats:
+   - Use "distance" field (in meters) for total distance
+   - Use "moving_time" field (in seconds) for total time
+   - Use "average_heartrate" field for HR
+   - Calculate overall pace
+
+CALCULATIONS:
+- Distance: meters / 1609.344 = miles
+- Pace: (moving_time_seconds / distance_miles) formatted as MM:SS
+- Round distance: if >= 10 mi use whole number, else 1 decimal
+- Round HR: to nearest whole number
+
+RESPONSE FORMAT:
+For Tempo:
+{
+  "type": "T",
+  "distance": 3.1,
+  "pace": "6:38",
+  "hr": 161
+}
+
+For Easy:
+{
+  "type": "E",
+  "distance": 7.3,
+  "pace": "9:05",
+  "hr": 124
+}`;
+
+// Helper to retry Strava API calls with token refresh on 401/403
+async function withTokenRetry<T>(
+  operation: (accessToken: string) => Promise<T>,
+  tokenRow: TokenRow
+): Promise<{ result: T; tokenRow: TokenRow }> {
+  try {
+    const result = await operation(tokenRow.access_token);
+    return { result, tokenRow };
+  } catch (e) {
+    const err = e as AxiosError;
+    if (
+      err.response &&
+      (err.response.status === 401 || err.response.status === 403)
+    ) {
+      const refreshedTokenRow = await refreshTokens(tokenRow);
+      const result = await operation(refreshedTokenRow.access_token);
+      return { result, tokenRow: refreshedTokenRow };
+    }
+    throw e;
+  }
 }
 
 export async function getRunNoteSummaryFromOpenAI(
   act: Activity
 ): Promise<string> {
-  const sys = `You are a running coach who summarizes structured workouts from Strava activity data. 
-  Your athletes follow Jack Daniels training plans and workouts which are usually broken up into:
-  R pace for repeition
-  I pace for interval
-  T pace for threshold
-  M pace for marathon
-  E pace for easy`;
+  const userPrompt = `Analyze this Strava activity. Determine if it's a Tempo (T) run with a clear workout block, or an Easy (E) run.
 
-  const usr = `Activity JSON:
-${JSON.stringify(act, null, 2)}
+Return your response as JSON.
 
-Rules:
-- Use miles and min/mi pace.
-- Include workout structure (e.g., 3x1mi at T pace, 5K T pace, 5x1k I at /mi pace, easy run).
-- Be concise: one descriptive line only.`;
+Activity data:
+${JSON.stringify(act)}`;
 
-  const res = await openai.responses.create({
-    model: 'gpt-4.1-mini',
-    input: [
-      { role: 'system', content: sys },
-      { role: 'user', content: usr },
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
     ],
   });
 
-  return res.output_text?.trim() || 'Easy run';
+  const jsonText = completion.choices[0]?.message?.content?.trim();
+  if (!jsonText) return 'Easy run';
+
+  const data = JSON.parse(jsonText);
+
+  if (data.type === 'T') {
+    return `T ${data.distance} mi @ avg ${data.pace}/mi`;
+  } else {
+    // Format distance: whole number if >= 10, else 1 decimal
+    const distStr =
+      data.distance >= 10
+        ? Math.round(data.distance).toString()
+        : data.distance.toFixed(1);
+    return `E ${distStr} mi @ ${data.pace}/mi (HR ${data.hr})`;
+  }
 }
+
 /**
  * Azure Function: webhook
  *
@@ -122,67 +193,23 @@ app.http('webhook', {
       let rec: TokenRow = await ensureValidTokens(athleteId);
 
       // GET activity (retry if 401/403)
-      let act: any;
-      try {
-        act = await getActivity(activityId, rec.access_token);
-      } catch (e) {
-        const err = e as AxiosError;
-        if (
-          err.response &&
-          (err.response.status === 401 || err.response.status === 403)
-        ) {
-          rec = await refreshTokens(rec);
-          act = await getActivity(activityId, rec.access_token);
-        } else {
-          throw e;
-        }
-      }
-
-      // 1) Ask your LLM for the summary (string), e.g. "Easy run" or "Tempo 4×1k ..."
-      //const llmSummary = 'Easy run'; // <- today hard-coded; later replace with LLM output
+      const { result: act, tokenRow: updatedRec } = await withTokenRetry(
+        (token) => getActivity(activityId, token),
+        rec
+      );
+      rec = updatedRec;
 
       const llmSummary = await getRunNoteSummaryFromOpenAI(act);
 
-      // 2) Normalize
       const current = act.description || '';
       const next = applyRunNoteTopLLMSafe(current, llmSummary);
 
-      // 3) Only update if changed (retry with refresh as you already do)
-      // if (next !== current) {
-      //   await updateActivityDescription(activityId, next, rec.access_token);
-      // }
-
-      // Update if changed (retry if 401/403)
-      // try {
-      //   await updateActivityDescription(activityId, next, rec.access_token);
-      // } catch (e) {
-      //   const err = e as AxiosError;
-      //   if (
-      //     err.response &&
-      //     (err.response.status === 401 || err.response.status === 403)
-      //   ) {
-      //     rec = await refreshTokens(rec);
-      //     await updateActivityDescription(activityId, next, rec.access_token);
-      //   } else {
-      //     throw e;
-      //   }
-      // }
-
       if (next !== current) {
-        try {
-          await updateActivityDescription(activityId, next, rec.access_token);
-        } catch (e) {
-          // If token expired, refresh once and retry
-          if (
-            (e as any)?.response?.status === 401 ||
-            (e as any)?.response?.status === 403
-          ) {
-            rec = await refreshTokens(rec);
-            await updateActivityDescription(activityId, next, rec.access_token);
-          } else {
-            throw e;
-          }
-        }
+        const { tokenRow: finalRec } = await withTokenRetry(
+          (token) => updateActivityDescription(activityId, next, token),
+          rec
+        );
+        rec = finalRec;
       }
 
       ctx.log(`Activity ${activityId} updated with RunNote`);
@@ -223,8 +250,8 @@ export function applyRunNoteTopLLMSafe(
 
   // Assemble final: canonical RunNote line on top, others below
   if (kept.length === 0) {
-    return `${runNoteLine}\n`;
+    return `${runNoteLine}\n\n`;
   } else {
-    return `${runNoteLine}\n${kept.join('\n')}`;
+    return `${runNoteLine}\n\n${kept.join('\n')}`;
   }
 }

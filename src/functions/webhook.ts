@@ -15,57 +15,82 @@ import { TokenRow } from '../shared/tokenStore';
 import { Activity } from '../models/activity.model';
 import { openai } from '../shared/ai';
 
-// OpenAI System Prompt for Run Analysis
-const SYSTEM_PROMPT = `You analyze running workouts from Strava activity data to classify them as Tempo (T) or Easy (E) runs.
+// OpenAI System Prompt for Run Analysis with Function Calling
+const SYSTEM_PROMPT = `You analyze running workouts from Strava activity data to classify and summarize them.
+
+You have access to calculator tools that perform accurate arithmetic. IMPORTANT: Call exactly ONE tool function, then format the result.
+
+WORKFLOW:
+1. Analyze the activity and classify as Tempo (T) or Easy (E)
+2. Call EXACTLY ONE calculator function (not multiple):
+   - For Easy runs: call calculateRunMetrics with overall activity data
+   - For Tempo runs: call calculateTempoBlockMetrics with the tempo lap data
+3. Use the calculation result to format your final response
 
 TEMPO RUN DETECTION:
-1. Examine the "laps" array for contiguous laps that form a workout block
-2. A tempo block has ALL these characteristics:
-   - Heart rate sustained at 150+ bpm (check average_heartrate)
-   - Pace zone is 3 or 4 (check pace_zone field)
-   - Duration: 15-40 minutes total
-   - Significantly faster than warmup/cooldown laps
-3. If found, calculate the tempo block:
-   - Sum moving_time and distance for those laps
-   - Convert meters to miles: divide by 1609.344
-   - Calculate pace: seconds_per_mile = total_seconds / total_miles
-   - Convert to MM:SS format
+- Look for contiguous laps with: HR 150+ bpm, pace zones 3-4, duration 15-40min
+- If found, extract those specific laps and call calculateTempoBlockMetrics ONCE
 
 EASY RUN DETECTION:
-1. If no tempo block exists, it's an easy run
-2. Easy runs have these patterns:
-   - Heart rate mostly in zones 1-2 (typically 115-145 bpm)
-   - No sustained elevated HR (no blocks with 150+ bpm sustained)
-   - Consistent pace throughout, no clear "workout block"
-   - Max HR may briefly spike but doesn't sustain high
-3. For easy runs, use overall activity stats:
-   - Use "distance" field (in meters) for total distance
-   - Use "moving_time" field (in seconds) for total time
-   - Use "average_heartrate" field for HR
-   - Calculate overall pace
+- No sustained workout blocks, HR in zones 1-2, consistent pace
+- Extract overall activity stats and call calculateRunMetrics ONCE
 
-CALCULATIONS:
-- Distance: meters / 1609.344 = miles
-- Pace: (moving_time_seconds / distance_miles) formatted as MM:SS
-- Round distance: if >= 10 mi use whole number, else 1 decimal
-- Round HR: to nearest whole number
+OUTPUT FORMAT:
+After receiving the calculation result, respond with the formatted summary:
+- Tempo: "T {distance} mi @ avg {pace}/mi"
+- Easy: "E {distance} mi @ {pace}/mi (HR {hr})"
+- Always use distance rounded to 1 decimal from the calculation result`;
 
-RESPONSE FORMAT:
-For Tempo:
-{
-  "type": "T",
-  "distance": 3.1,
-  "pace": "6:38",
-  "hr": 161
+// Helper to format pace from seconds per mile to MM:SS
+function formatPace(secondsPerMile: number): string {
+  const minutes = Math.floor(secondsPerMile / 60);
+  const seconds = Math.round(secondsPerMile % 60);
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-For Easy:
-{
-  "type": "E",
-  "distance": 7.3,
-  "pace": "9:05",
-  "hr": 124
-}`;
+// Tool function: Calculate running metrics from distance and time
+function calculateRunMetrics(params: {
+  distance_meters: number;
+  moving_time_seconds: number;
+  average_heartrate: number;
+}): string {
+  const distanceMiles = params.distance_meters / 1609.344;
+  const secondsPerMile = params.moving_time_seconds / distanceMiles;
+  const pace = formatPace(secondsPerMile);
+  const hr = Math.round(params.average_heartrate);
+
+  return JSON.stringify({
+    distance_miles: distanceMiles,
+    pace: pace,
+    hr: hr,
+  });
+}
+
+// Tool function: Calculate tempo block metrics from lap data
+function calculateTempoBlockMetrics(params: {
+  laps: Array<{
+    distance: number;
+    moving_time: number;
+    average_heartrate: number;
+  }>;
+}): string {
+  const totalDistance = params.laps.reduce((sum, lap) => sum + lap.distance, 0);
+  const totalTime = params.laps.reduce((sum, lap) => sum + lap.moving_time, 0);
+  const avgHr = Math.round(
+    params.laps.reduce((sum, lap) => sum + lap.average_heartrate, 0) /
+      params.laps.length
+  );
+
+  const distanceMiles = totalDistance / 1609.344;
+  const secondsPerMile = totalTime / distanceMiles;
+  const pace = formatPace(secondsPerMile);
+
+  return JSON.stringify({
+    distance_miles: distanceMiles,
+    pace: pace,
+    hr: avgHr,
+  });
+}
 
 // Helper to retry Strava API calls with token refresh on 401/403
 async function withTokenRetry<T>(
@@ -92,38 +117,140 @@ async function withTokenRetry<T>(
 export async function getRunNoteSummaryFromOpenAI(
   act: Activity
 ): Promise<string> {
-  const userPrompt = `Analyze this Strava activity. Determine if it's a Tempo (T) run with a clear workout block, or an Easy (E) run.
+  // Define the tools available to the LLM
+  const tools = [
+    {
+      type: 'function' as const,
+      function: {
+        name: 'calculateRunMetrics',
+        description:
+          'Calculate accurate running metrics (distance, pace, HR) from raw activity data. Use this for easy runs.',
+        parameters: {
+          type: 'object',
+          properties: {
+            distance_meters: {
+              type: 'number',
+              description: 'Total distance in meters',
+            },
+            moving_time_seconds: {
+              type: 'number',
+              description: 'Total moving time in seconds',
+            },
+            average_heartrate: {
+              type: 'number',
+              description: 'Average heart rate in bpm',
+            },
+          },
+          required: [
+            'distance_meters',
+            'moving_time_seconds',
+            'average_heartrate',
+          ],
+        },
+      },
+    },
+    {
+      type: 'function' as const,
+      function: {
+        name: 'calculateTempoBlockMetrics',
+        description:
+          'Calculate accurate metrics for a tempo workout block from lap data. Use this for tempo runs.',
+        parameters: {
+          type: 'object',
+          properties: {
+            laps: {
+              type: 'array',
+              description: 'Array of laps that form the tempo block',
+              items: {
+                type: 'object',
+                properties: {
+                  distance: {
+                    type: 'number',
+                    description: 'Lap distance in meters',
+                  },
+                  moving_time: {
+                    type: 'number',
+                    description: 'Lap moving time in seconds',
+                  },
+                  average_heartrate: {
+                    type: 'number',
+                    description: 'Lap average HR in bpm',
+                  },
+                },
+                required: ['distance', 'moving_time', 'average_heartrate'],
+              },
+            },
+          },
+          required: ['laps'],
+        },
+      },
+    },
+  ];
 
-Return your response as JSON.
+  const messages: any[] = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    {
+      role: 'user',
+      content: `Analyze this Strava activity and provide a summary.
 
 Activity data:
-${JSON.stringify(act)}`;
+${JSON.stringify(act)}`,
+    },
+  ];
 
-  const completion = await openai.chat.completions.create({
+  // Function calling loop
+  let response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     temperature: 0.2,
-    response_format: { type: 'json_object' },
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt },
-    ],
+    messages: messages,
+    tools: tools,
+    tool_choice: 'auto',
   });
 
-  const jsonText = completion.choices[0]?.message?.content?.trim();
-  if (!jsonText) return 'Easy run';
+  // Handle tool calls
+  while (response.choices[0].finish_reason === 'tool_calls') {
+    const toolCalls = response.choices[0].message.tool_calls;
+    if (!toolCalls) break;
 
-  const data = JSON.parse(jsonText);
+    // Add assistant's message with tool calls
+    messages.push(response.choices[0].message);
 
-  if (data.type === 'T') {
-    return `T ${data.distance} mi @ avg ${data.pace}/mi`;
-  } else {
-    // Format distance: whole number if >= 10, else 1 decimal
-    const distStr =
-      data.distance >= 10
-        ? Math.round(data.distance).toString()
-        : data.distance.toFixed(1);
-    return `E ${distStr} mi @ ${data.pace}/mi (HR ${data.hr})`;
+    // Execute each tool call
+    for (const toolCall of toolCalls) {
+      // Type assertion needed for OpenAI SDK
+      const functionName = (toolCall as any).function.name;
+      const functionArgs = JSON.parse((toolCall as any).function.arguments);
+
+      let functionResponse: string;
+      if (functionName === 'calculateRunMetrics') {
+        functionResponse = calculateRunMetrics(functionArgs);
+      } else if (functionName === 'calculateTempoBlockMetrics') {
+        functionResponse = calculateTempoBlockMetrics(functionArgs);
+      } else {
+        functionResponse = JSON.stringify({ error: 'Unknown function' });
+      }
+
+      // Add function response to messages
+      messages.push({
+        role: 'tool',
+        tool_call_id: (toolCall as any).id,
+        content: functionResponse,
+      });
+    }
+
+    // Get next response from the model
+    response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.2,
+      messages: messages,
+      tools: tools,
+      tool_choice: 'auto',
+    });
   }
+
+  // Return the final text response
+  const finalMessage = response.choices[0].message.content?.trim();
+  return finalMessage || 'Easy run';
 }
 
 /**

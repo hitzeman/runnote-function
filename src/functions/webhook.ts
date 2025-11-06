@@ -22,13 +22,22 @@ You have access to calculator tools that perform accurate arithmetic. IMPORTANT:
 
 WORKFLOW:
 1. Analyze the activity and classify as Tempo (T) or Easy (E)
-2. Call EXACTLY ONE calculator function (not multiple):
+2. Determine if Tempo is INTERVAL or CONTINUOUS
+3. Call EXACTLY ONE calculator function (not multiple):
    - For Easy runs: call calculateRunMetrics with overall activity data
-   - For Tempo runs: call calculateTempoBlockMetrics with the tempo lap data
-3. Use the calculation result to format your final response
+   - For INTERVAL Tempo: call calculateIntervalMetrics with work interval laps only
+   - For CONTINUOUS Tempo: call calculateTempoBlockMetrics with the tempo lap data
+4. Use the calculation result to format your final response
 
-TEMPO RUN DETECTION:
-- Look for contiguous laps with: HR 150+ bpm, pace zones 3-4, duration 15-40min
+INTERVAL TEMPO DETECTION (primary):
+- Look for alternating pattern of work and recovery laps
+- Work intervals: 900-1700m distance, pace zone 4, HR 150+ bpm
+- Recovery laps: <150m distance, pace zone 1, <60 seconds
+- Distance pattern is PRIMARY indicator (HR stays elevated during recovery)
+- If found, extract ONLY the work interval laps and call calculateIntervalMetrics ONCE
+
+CONTINUOUS TEMPO DETECTION (secondary):
+- Look for 3+ contiguous laps with: HR 150+ bpm, pace zones 3-4, each lap >1000m, 15-30min total duration
 - If found, extract those specific laps and call calculateTempoBlockMetrics ONCE
 
 EASY RUN DETECTION:
@@ -37,9 +46,11 @@ EASY RUN DETECTION:
 
 OUTPUT FORMAT:
 After receiving the calculation result, respond with the formatted summary:
-- Tempo: "T {distance} mi @ avg {pace}/mi"
-- Easy: "E {distance} mi @ {pace}/mi (HR {hr})"
-- Always use distance rounded to 1 decimal from the calculation result`;
+- Interval Tempo: "T {count} x {interval_distance} @ {pace1}, {pace2}, {pace3} --from RunNote"
+- Continuous Tempo: "T {distance} mi @ avg {pace}/mi --from RunNote"
+- Easy: "E {distance} mi @ {pace}/mi (HR {hr}) --from RunNote"
+- Distance formatting: Use 1 decimal (e.g., 0.6 mi) for distances under 1 mile, whole numbers (e.g., 1km) for metric
+- Always end with "--from RunNote" (note: double dash, not single)`;
 
 // Helper to format pace from seconds per mile to MM:SS
 function formatPace(secondsPerMile: number): string {
@@ -88,6 +99,38 @@ function calculateTempoBlockMetrics(params: {
   return JSON.stringify({
     distance_miles: distanceMiles,
     pace: pace,
+    hr: avgHr,
+  });
+}
+
+// Tool function: Calculate interval metrics from work intervals
+function calculateIntervalMetrics(params: {
+  laps: Array<{
+    distance: number;
+    moving_time: number;
+    average_heartrate: number;
+  }>;
+}): string {
+  // Calculate individual pace for each interval
+  const individualPaces = params.laps.map((lap) => {
+    const distanceMiles = lap.distance / 1609.344;
+    const secondsPerMile = lap.moving_time / distanceMiles;
+    return formatPace(secondsPerMile);
+  });
+
+  // Calculate average distance per interval
+  const avgDistance = params.laps.reduce((sum, lap) => sum + lap.distance, 0) / params.laps.length;
+  const distancePerIntervalMiles = avgDistance / 1609.344;
+
+  // Calculate average heart rate across all intervals
+  const avgHr = Math.round(
+    params.laps.reduce((sum, lap) => sum + lap.average_heartrate, 0) / params.laps.length
+  );
+
+  return JSON.stringify({
+    interval_count: params.laps.length,
+    distance_per_interval_miles: distancePerIntervalMiles,
+    individual_paces: individualPaces,
     hr: avgHr,
   });
 }
@@ -154,13 +197,49 @@ export async function getRunNoteSummaryFromOpenAI(
       function: {
         name: 'calculateTempoBlockMetrics',
         description:
-          'Calculate accurate metrics for a tempo workout block from lap data. Use this for tempo runs.',
+          'Calculate accurate metrics for a continuous tempo workout block from lap data. Use this for continuous tempo runs.',
         parameters: {
           type: 'object',
           properties: {
             laps: {
               type: 'array',
               description: 'Array of laps that form the tempo block',
+              items: {
+                type: 'object',
+                properties: {
+                  distance: {
+                    type: 'number',
+                    description: 'Lap distance in meters',
+                  },
+                  moving_time: {
+                    type: 'number',
+                    description: 'Lap moving time in seconds',
+                  },
+                  average_heartrate: {
+                    type: 'number',
+                    description: 'Lap average HR in bpm',
+                  },
+                },
+                required: ['distance', 'moving_time', 'average_heartrate'],
+              },
+            },
+          },
+          required: ['laps'],
+        },
+      },
+    },
+    {
+      type: 'function' as const,
+      function: {
+        name: 'calculateIntervalMetrics',
+        description:
+          'Calculate accurate metrics for interval tempo workouts from work interval lap data. Use this for interval tempo runs (e.g., 6x1km, 4x1mi). Pass ONLY the work interval laps, not recovery laps.',
+        parameters: {
+          type: 'object',
+          properties: {
+            laps: {
+              type: 'array',
+              description: 'Array of work interval laps only (not recovery laps)',
               items: {
                 type: 'object',
                 properties: {
@@ -226,6 +305,8 @@ ${JSON.stringify(act)}`,
         functionResponse = calculateRunMetrics(functionArgs);
       } else if (functionName === 'calculateTempoBlockMetrics') {
         functionResponse = calculateTempoBlockMetrics(functionArgs);
+      } else if (functionName === 'calculateIntervalMetrics') {
+        functionResponse = calculateIntervalMetrics(functionArgs);
       } else {
         functionResponse = JSON.stringify({ error: 'Unknown function' });
       }

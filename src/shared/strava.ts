@@ -64,14 +64,23 @@ export async function getActivity(activityId: string, accessToken: string) {
   return data;
 }
 
+export async function updateActivity(
+  activityId: string,
+  updates: { description?: string; name?: string },
+  accessToken: string
+) {
+  await axios.put(
+    `https://www.strava.com/api/v3/activities/${activityId}`,
+    updates,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+}
+
+// Deprecated: Use updateActivity instead
 export async function updateActivityDescription(
   activityId: string,
   description: string,
   accessToken: string
 ) {
-  await axios.put(
-    `https://www.strava.com/api/v3/activities/${activityId}`,
-    { description },
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
+  await updateActivity(activityId, { description }, accessToken);
 }

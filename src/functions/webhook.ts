@@ -9,7 +9,7 @@ import {
   ensureValidTokens,
   refreshTokens,
   getActivity,
-  updateActivityDescription,
+  updateActivity,
 } from '../shared/strava';
 import { TokenRow } from '../shared/tokenStore';
 import { Activity } from '../models/activity.model';
@@ -65,6 +65,29 @@ function formatPace(secondsPerMile: number): string {
   const minutes = Math.floor(secondsPerMile / 60);
   const seconds = Math.round(secondsPerMile % 60);
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+// Helper to extract run type from LLM summary (L, T, or E)
+function extractRunType(summary: string): 'L' | 'T' | 'E' | null {
+  const trimmed = summary.trim();
+  if (trimmed.startsWith('L ')) return 'L';
+  if (trimmed.startsWith('T ')) return 'T';
+  if (trimmed.startsWith('E ')) return 'E';
+  return null;
+}
+
+// Helper to generate activity title based on run type
+function generateActivityTitle(runType: 'L' | 'T' | 'E' | null): string | null {
+  switch (runType) {
+    case 'L':
+      return 'Long Run';
+    case 'T':
+      return 'Tempo Run';
+    case 'E':
+      return 'Easy Run';
+    default:
+      return null;
+  }
 }
 
 // Tool function: Calculate running metrics from distance and time
@@ -420,9 +443,17 @@ app.http('webhook', {
       const current = act.description || '';
       const next = applyRunNoteTopLLMSafe(current, llmSummary);
 
-      if (next !== current) {
+      // Extract run type and generate title
+      const runType = extractRunType(llmSummary);
+      const title = generateActivityTitle(runType);
+
+      if (next !== current || title) {
+        const updates: { description?: string; name?: string } = {};
+        if (next !== current) updates.description = next;
+        if (title) updates.name = title;
+
         const { tokenRow: finalRec } = await withTokenRetry(
-          (token) => updateActivityDescription(activityId, next, token),
+          (token) => updateActivity(activityId, updates, token),
           rec
         );
         rec = finalRec;

@@ -45,12 +45,12 @@ EASY RUN DETECTION:
 - Extract overall activity stats and call calculateRunMetrics ONCE
 
 OUTPUT FORMAT:
-After receiving the calculation result, respond with the formatted summary:
-- Interval Tempo: "T {count} x {interval_distance} @ {pace1}, {pace2}, {pace3} --from RunNote"
-- Continuous Tempo: "T {distance} mi @ avg {pace}/mi --from RunNote"
-- Easy: "E {distance} mi @ {pace}/mi (HR {hr}) --from RunNote"
+After receiving the calculation result, respond with EXACTLY ONE formatted summary line:
+- Interval Tempo: "T {count} x {interval_distance} @ {pace1}, {pace2}, {pace3}"
+- Continuous Tempo: "T {distance} mi @ avg {pace}/mi"
+- Easy: "E {distance} mi @ {pace}/mi (HR {hr})"
 - Distance formatting: Use 1 decimal (e.g., 0.6 mi) for distances under 1 mile, whole numbers (e.g., 1km) for metric
-- Always end with "--from RunNote" (note: double dash, not single)`;
+- Return ONLY the summary line, nothing else (no markers, no extra text)`;
 
 // Helper to format pace from seconds per mile to MM:SS
 function formatPace(secondsPerMile: number): string {
@@ -442,7 +442,11 @@ export function applyRunNoteTopLLMSafe(
   const desc = (existing ?? '').replace(/\r\n/g, '\n');
 
   // Collapse the LLM summary to one line (no newlines, no trailing spaces)
-  const summaryLine = llmSummary.replace(/\s*\n+\s*/g, ' ').trim();
+  let summaryLine = llmSummary.replace(/\s*\n+\s*/g, ' ').trim();
+
+  // Strip any existing "--from RunNote" markers from the LLM summary (case-insensitive)
+  // This prevents duplicate markers if the LLM includes them
+  summaryLine = summaryLine.replace(/\s*--\s*from\s*RunNote\s*/gi, '').trim();
 
   // Build the canonical RunNote line we want to appear once
   const runNoteLine = `${summaryLine} ${marker}`;

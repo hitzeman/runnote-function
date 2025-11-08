@@ -36,8 +36,10 @@ export async function getTokens(athleteId: string): Promise<TokenRow | null> {
   } catch {}
   try {
     const e = await t.getEntity<TokenRow>('athlete', athleteId);
+    console.log(`[TokenStore] Retrieved tokens for athlete ${athleteId}`);
     return e as TokenRow;
   } catch {
+    console.log(`[TokenStore] No tokens found for athlete ${athleteId}`);
     return null;
   }
 }
@@ -48,4 +50,5 @@ export async function saveTokens(row: TokenRow): Promise<void> {
     await t.createTable();
   } catch {}
   await t.upsertEntity(row, 'Replace');
+  console.log(`[TokenStore] Saved tokens for athlete ${row.rowKey}, expires_at: ${row.expires_at}`);
 }

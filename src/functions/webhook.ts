@@ -102,8 +102,11 @@ app.http('webhook', {
     if (req.method === 'GET') {
       const verify = req.query.get('hub.verify_token');
       const challenge = req.query.get('hub.challenge');
-      if (verify !== process.env.VerifyToken)
+      if (verify !== process.env.VerifyToken) {
+        ctx.warn('Webhook verification failed: invalid verify token');
         return { status: 403, body: 'Invalid verify token' };
+      }
+      ctx.log('Webhook verification successful');
       return { status: 200, jsonBody: { 'hub.challenge': challenge } };
     }
 
@@ -111,8 +114,17 @@ app.http('webhook', {
     try {
       const body = (await req.json()) as any;
 
+      // Validate required webhook fields
+      if (!body?.object_type || !body?.aspect_type || !body?.object_id || !body?.owner_id) {
+        ctx.warn('Invalid webhook payload: missing required fields', body);
+        return { status: 200 }; // Still ACK to Strava
+      }
+
+      ctx.log(`Webhook received: ${body.object_type}/${body.aspect_type} - object_id: ${body.object_id}, owner_id: ${body.owner_id}`);
+
       // Only handle "create" to start (add "update" later if you want)
       if (body?.object_type !== 'activity' || body?.aspect_type !== 'create') {
+        ctx.log(`Ignoring ${body.object_type}/${body.aspect_type} event`);
         return { status: 200 };
       }
 

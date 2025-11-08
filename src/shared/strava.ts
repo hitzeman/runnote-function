@@ -21,6 +21,7 @@ export async function exchangeCodeForToken(code: string) {
 }
 
 export async function refreshTokens(old: TokenRow): Promise<TokenRow> {
+  console.log(`[Strava] Refreshing tokens for athlete ${old.rowKey}`);
   const { data } = await axios.post(
     'https://www.strava.com/api/v3/oauth/token',
     {
@@ -38,6 +39,7 @@ export async function refreshTokens(old: TokenRow): Promise<TokenRow> {
     expires_at: data.expires_at,
   };
   await saveTokens(updated);
+  console.log(`[Strava] Successfully refreshed tokens for athlete ${old.rowKey}`);
   return updated;
 }
 

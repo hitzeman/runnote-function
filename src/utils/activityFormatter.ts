@@ -14,7 +14,7 @@ export function generateActivityTitle(workoutType: WorkoutType): string {
     T: 'Tempo Run',
     E: 'Easy Run',
     V: 'VO2max Intervals',
-    R: 'Repetitions',
+    R: 'Repetition Run',
   };
   return titles[workoutType];
 }
@@ -23,9 +23,40 @@ export function generateActivityTitle(workoutType: WorkoutType): string {
  * Format workout analysis result into a human-readable summary
  */
 export function formatWorkoutSummary(result: WorkoutAnalysisResult): string {
-  const { type, structure, metrics, interval_metrics } = result;
+  const { type, structure, metrics, interval_metrics, repetition_metrics } = result;
 
-  // Interval workouts (Tempo intervals, VO2max, Repetitions)
+  // Repetition workouts - format as structural description
+  if (repetition_metrics) {
+    const { sets, reps_per_set, work_distance_meters, recovery_distance_meters, between_set_recovery_distance_meters } = repetition_metrics;
+
+    // Format distances in meters
+    const workDist = `${work_distance_meters}m`;
+    const recDist = `${recovery_distance_meters}m`;
+
+    // Build the workout structure description
+    let description: string;
+    if (sets === 1) {
+      // Single set: "8 x 200m R w/200m jog"
+      description = `${reps_per_set} x ${workDist} R w/${recDist} jog`;
+    } else {
+      // Multiple sets with between-set recovery
+      const betweenSetDist = between_set_recovery_distance_meters > 0
+        ? `${between_set_recovery_distance_meters}m`
+        : recDist;
+
+      // Format: "2 sets of (8 x 200m R w/200m jog) w/800m jog"
+      // or "2 x(8 x 200m R w/200m jog) w/800m jog"
+      if (sets > 1) {
+        description = `${sets} sets of (${reps_per_set} x ${workDist} R w/${recDist} jog) w/${betweenSetDist} jog`;
+      } else {
+        description = `${reps_per_set} x ${workDist} R w/${recDist} jog`;
+      }
+    }
+
+    return description;
+  }
+
+  // Interval workouts (Tempo intervals, VO2max)
   if (interval_metrics) {
     const formattedPaces = interval_metrics.individual_paces_seconds
       .map((pace) => formatPace(pace))

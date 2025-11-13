@@ -5,6 +5,7 @@ import {
   calculateRunMetrics,
   calculateTempoBlockMetrics,
   calculateIntervalMetrics,
+  calculateRepetitionStructure,
 } from './workoutCalculations';
 
 /**
@@ -23,7 +24,7 @@ WORKFLOW:
    - For INTERVAL Tempo: call calculateIntervalMetrics with work interval laps only
    - For CONTINUOUS Tempo: call calculateTempoBlockMetrics with the tempo lap data
    - For VO2max: call calculateIntervalMetrics with work interval laps only
-   - For Repetitions: call calculateIntervalMetrics with work interval laps only
+   - For Repetitions: call calculateRepetitionStructure with all workout laps (excluding warmup/cooldown)
 4. Return structured JSON with the workout type and metrics
 
 DETECTION RULES (in priority order):
@@ -34,14 +35,23 @@ LONG RUN DETECTION (first priority):
 - Extract overall activity stats and call calculateRunMetrics ONCE
 - Skip all other detection steps
 
-INTERVAL TEMPO DETECTION (second priority):
+REPETITION RUN DETECTION (second priority):
+- Look for alternating pattern of very short, fast work intervals with equal-distance recovery
+- Work intervals: 200-600m distance, pace zones 5-6 (very fast), average_speed > 4.3 m/s
+- Recovery intervals: same distance as work intervals (200-600m), much slower pace (zones 1-2), average_speed < 3.5 m/s
+- Pattern: fast lap, slow lap, fast lap, slow lap, etc.
+- May include longer recovery laps (>600m) between sets
+- If found, extract ALL laps (warmup/cooldown removed) and call calculateRepetitionStructure ONCE
+- Skip all other detection steps
+
+INTERVAL TEMPO DETECTION (third priority):
 - Look for alternating pattern of work and recovery laps
 - Work intervals: 900-1700m distance, pace zone 4, HR 150+ bpm
 - Recovery laps: <150m distance, pace zone 1, <60 seconds
 - Distance pattern is PRIMARY indicator (HR stays elevated during recovery)
 - If found, extract ONLY the work interval laps and call calculateIntervalMetrics ONCE
 
-CONTINUOUS TEMPO DETECTION (third priority):
+CONTINUOUS TEMPO DETECTION (fourth priority):
 - Look for 3+ contiguous laps with: HR 150+ bpm, pace zones 3-4, each lap >1000m, 15-30min total duration
 - If found, extract those specific laps and call calculateTempoBlockMetrics ONCE
 
@@ -55,7 +65,8 @@ Return a structured JSON object with:
   "type": "L" | "T" | "E" | "V" | "R",
   "structure": "interval" | "continuous" (only for Tempo runs),
   "metrics": { distance_miles, pace_seconds_per_mile, average_heartrate } (for continuous workouts),
-  "interval_metrics": { interval_count, distance_per_interval_miles, individual_paces_seconds[], average_heartrate } (for interval workouts)
+  "interval_metrics": { interval_count, distance_per_interval_miles, individual_paces_seconds[], average_heartrate } (for interval workouts),
+  "repetition_metrics": { sets, reps_per_set, work_distance_meters, recovery_distance_meters, between_set_recovery_distance_meters } (for repetition workouts)
 }`;
 
 /**
@@ -168,6 +179,43 @@ const tools = [
   {
     type: 'function' as const,
     function: {
+      name: 'calculateRepetitionStructure',
+      description:
+        'Analyze repetition workout structure from lap data. Use this for repetition (R) workouts. Pass all workout laps excluding warmup/cooldown.',
+      parameters: {
+        type: 'object',
+        properties: {
+          laps: {
+            type: 'array',
+            description:
+              'Array of all workout laps (work + recovery), excluding warmup/cooldown',
+            items: {
+              type: 'object',
+              properties: {
+                distance: {
+                  type: 'number',
+                  description: 'Lap distance in meters',
+                },
+                moving_time: {
+                  type: 'number',
+                  description: 'Lap moving time in seconds',
+                },
+                average_speed: {
+                  type: 'number',
+                  description: 'Lap average speed in m/s',
+                },
+              },
+              required: ['distance', 'moving_time', 'average_speed'],
+            },
+          },
+        },
+        required: ['laps'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
       name: 'returnWorkoutResult',
       description:
         'Return the final structured workout analysis result after calling calculation functions. Must be called after exactly one calculation function.',
@@ -206,6 +254,17 @@ const tools = [
                 items: { type: 'number' },
               },
               average_heartrate: { type: 'number' },
+            },
+          },
+          repetition_metrics: {
+            type: 'object',
+            description: 'Metrics for repetition workouts (from calculation)',
+            properties: {
+              sets: { type: 'number' },
+              reps_per_set: { type: 'number' },
+              work_distance_meters: { type: 'number' },
+              recovery_distance_meters: { type: 'number' },
+              between_set_recovery_distance_meters: { type: 'number' },
             },
           },
         },
@@ -266,6 +325,9 @@ ${JSON.stringify(activity)}`,
         functionResponse = JSON.stringify(calculationResult);
       } else if (functionName === 'calculateIntervalMetrics') {
         calculationResult = calculateIntervalMetrics(functionArgs);
+        functionResponse = JSON.stringify(calculationResult);
+      } else if (functionName === 'calculateRepetitionStructure') {
+        calculationResult = calculateRepetitionStructure(functionArgs);
         functionResponse = JSON.stringify(calculationResult);
       } else if (functionName === 'returnWorkoutResult') {
         // Final result function - return the structured result

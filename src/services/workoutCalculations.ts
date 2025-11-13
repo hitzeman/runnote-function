@@ -1,6 +1,7 @@
 import {
   BaseWorkoutMetrics,
   IntervalWorkoutMetrics,
+  RepetitionWorkoutMetrics,
 } from '../models/workoutTypes';
 
 /**
@@ -92,5 +93,61 @@ export function calculateIntervalMetrics(params: {
     distance_per_interval_miles: distancePerIntervalMiles,
     individual_paces_seconds: individualPacesSeconds,
     average_heartrate: avgHr,
+  };
+}
+
+/**
+ * Analyze repetition workout structure from lap data
+ * Used for: Repetition (R) workouts with sets and reps
+ *
+ * This function analyzes the workout structure to determine:
+ * - Number of sets
+ * - Number of reps per set
+ * - Work interval distance
+ * - Recovery interval distance
+ * - Between-set recovery distance
+ */
+export function calculateRepetitionStructure(params: {
+  laps: Array<{
+    distance: number;
+    moving_time: number;
+    average_speed: number;
+  }>;
+}): RepetitionWorkoutMetrics {
+  // Find work and recovery laps based on speed differential
+  // Work laps are significantly faster than recovery laps
+  const avgSpeed = params.laps.reduce((sum, lap) => sum + lap.average_speed, 0) / params.laps.length;
+  const workLaps = params.laps.filter(lap => lap.average_speed > avgSpeed);
+  const recoveryLaps = params.laps.filter(lap => lap.average_speed <= avgSpeed);
+
+  // Determine work distance (most common distance among fast laps)
+  const workDistance = Math.round(workLaps[0]?.distance || 200);
+
+  // Determine recovery distance (most common short distance among slow laps)
+  const shortRecoveryLaps = recoveryLaps.filter(lap => lap.distance < 400);
+  const recoveryDistance = Math.round(shortRecoveryLaps[0]?.distance || workDistance);
+
+  // Find between-set recovery (long slow laps)
+  const longRecoveryLaps = recoveryLaps.filter(lap => lap.distance >= 600);
+  const betweenSetRecovery = longRecoveryLaps.length > 0
+    ? Math.round(longRecoveryLaps[0].distance)
+    : 0;
+
+  // Calculate sets and reps per set
+  let sets = 1;
+  let repsPerSet = workLaps.length;
+
+  if (longRecoveryLaps.length > 0) {
+    // If there are long recovery laps, they separate sets
+    sets = longRecoveryLaps.length + 1;
+    repsPerSet = Math.round(workLaps.length / sets);
+  }
+
+  return {
+    sets,
+    reps_per_set: repsPerSet,
+    work_distance_meters: workDistance,
+    recovery_distance_meters: recoveryDistance,
+    between_set_recovery_distance_meters: betweenSetRecovery,
   };
 }

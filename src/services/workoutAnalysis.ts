@@ -36,23 +36,26 @@ LONG RUN DETECTION (first priority):
 - Skip all other detection steps
 
 REPETITION RUN DETECTION (second priority):
+- IMPORTANT: Analyze the activity.laps array (NOT splits_metric or splits_standard)
 - Look for alternating pattern of very short, fast work intervals with equal-distance recovery
 - Work intervals: 200-600m distance, pace zones 5-6 (very fast), average_speed > 4.3 m/s
 - Recovery intervals: same distance as work intervals (200-600m), much slower pace (zones 1-2), average_speed < 3.5 m/s
-- Pattern: fast lap, slow lap, fast lap, slow lap, etc.
+- Pattern in laps array: fast lap, slow lap, fast lap, slow lap, etc.
 - May include longer recovery laps (>600m) between sets
-- If found, extract ALL laps (warmup/cooldown removed) and call calculateRepetitionStructure ONCE
+- First lap may be warmup (>1000m, pace zone 1) - exclude it
+- Last lap may be cooldown (>1000m, pace zone 1) - exclude it
+- If found, extract ALL workout laps (warmup/cooldown removed) and call calculateRepetitionStructure ONCE
 - Skip all other detection steps
 
 INTERVAL TEMPO DETECTION (third priority):
-- Look for alternating pattern of work and recovery laps
+- Analyze the activity.laps array for alternating pattern of work and recovery laps
 - Work intervals: 900-1700m distance, pace zone 4, HR 150+ bpm
 - Recovery laps: <150m distance, pace zone 1, <60 seconds
 - Distance pattern is PRIMARY indicator (HR stays elevated during recovery)
 - If found, extract ONLY the work interval laps and call calculateIntervalMetrics ONCE
 
 CONTINUOUS TEMPO DETECTION (fourth priority):
-- Look for 3+ contiguous laps with: HR 150+ bpm, pace zones 3-4, each lap >1000m, 15-30min total duration
+- Analyze the activity.laps array for 3+ contiguous laps with: HR 150+ bpm, pace zones 3-4, each lap >1000m, 15-30min total duration
 - If found, extract those specific laps and call calculateTempoBlockMetrics ONCE
 
 EASY RUN DETECTION (default):

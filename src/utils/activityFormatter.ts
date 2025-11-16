@@ -27,25 +27,43 @@ export function formatWorkoutSummary(result: WorkoutAnalysisResult): string {
 
   // Repetition workouts - format as structural description
   if (repetition_metrics) {
-    const { sets, reps_per_set, work_distance_meters, recovery_distance_meters, between_set_recovery_distance_meters } = repetition_metrics;
-
-    // Format distances in meters
-    const workDist = `${work_distance_meters}m`;
-    const recDist = `${recovery_distance_meters}m`;
+    const { sets, reps_per_set, work_distance_meters, recovery_distance_meters, between_set_recovery_distance_meters, ladder_pattern } = repetition_metrics;
 
     // Build the workout structure description
     let description: string;
-    if (sets === 1) {
-      // Single set: "10 x 200m R w/200m jog"
-      description = `${reps_per_set} x ${workDist} R w/${recDist} jog`;
-    } else {
-      // Multiple sets with between-set recovery
-      const betweenSetDist = between_set_recovery_distance_meters > 0
-        ? `${between_set_recovery_distance_meters}m`
-        : recDist;
 
-      // Format: "2 x(8 x 200m R w/200m jog) w/800m jog"
-      description = `${sets} x(${reps_per_set} x ${workDist} R w/${recDist} jog) w/${betweenSetDist} jog`;
+    // Handle ladder/pyramid patterns (varying work distances per set)
+    if (ladder_pattern && ladder_pattern.length > 1) {
+      // Format: "4 x(200m, 200m, 400m) R w/ equal jog" or "4 x(200m, 200m, 400m) R"
+      const patternStr = ladder_pattern.map(d => `${d}m`).join(', ');
+
+      // Check if all recoveries are similar distance to work intervals
+      const avgWorkDist = ladder_pattern.reduce((a, b) => a + b, 0) / ladder_pattern.length;
+      const recoveryMatchesWork = Math.abs(recovery_distance_meters - avgWorkDist) / avgWorkDist < 0.3;
+
+      if (recoveryMatchesWork) {
+        description = `${sets} x(${patternStr}) R w/ equal jog`;
+      } else {
+        description = `${sets} x(${patternStr}) R`;
+      }
+    }
+    // Handle uniform repetitions (all same distance)
+    else {
+      const workDist = `${work_distance_meters}m`;
+      const recDist = `${recovery_distance_meters}m`;
+
+      if (sets === 1) {
+        // Single set: "10 x 200m R w/200m jog"
+        description = `${reps_per_set} x ${workDist} R w/${recDist} jog`;
+      } else {
+        // Multiple sets with between-set recovery
+        const betweenSetDist = between_set_recovery_distance_meters > 0
+          ? `${between_set_recovery_distance_meters}m`
+          : recDist;
+
+        // Format: "2 x(8 x 200m R w/200m jog) w/800m jog"
+        description = `${sets} x(${reps_per_set} x ${workDist} R w/${recDist} jog) w/${betweenSetDist} jog`;
+      }
     }
 
     return description;

@@ -293,6 +293,11 @@ const tools = [
               work_distance_meters: { type: 'number' },
               recovery_distance_meters: { type: 'number' },
               between_set_recovery_distance_meters: { type: 'number' },
+              ladder_pattern: {
+                type: 'array',
+                items: { type: 'number' },
+                description: 'For ladder/pyramid: distances per set (e.g. [200, 200, 400])',
+              },
             },
           },
         },

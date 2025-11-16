@@ -124,21 +124,64 @@ function roundToStandardDistance(meters: number): number {
 }
 
 /**
+ * Detect if work intervals form a repeating ladder pattern
+ */
+function detectLadderPattern(workDistances: number[]): number[] | null {
+  if (workDistances.length < 6) return null; // Need at least 2 sets of 3
+
+  // First check if all work intervals are uniform (no ladder)
+  const allSame = workDistances.every(d => Math.abs(d - workDistances[0]) / workDistances[0] < 0.1);
+  if (allSame) return null; // Not a ladder, just uniform reps
+
+  // Try pattern lengths from 2 to half the total work intervals
+  for (let patternLen = 2; patternLen <= Math.floor(workDistances.length / 2); patternLen++) {
+    const pattern = workDistances.slice(0, patternLen);
+
+    // Pattern must have VARYING distances (not all the same)
+    const patternHasVariation = !pattern.every(d => Math.abs(d - pattern[0]) / pattern[0] < 0.1);
+    if (!patternHasVariation) continue; // Skip uniform patterns
+
+    let matches = true;
+
+    // Check if this pattern repeats
+    for (let i = patternLen; i < workDistances.length; i++) {
+      const expectedDist = pattern[i % patternLen];
+      const actualDist = workDistances[i];
+
+      // Allow 10% tolerance for matching
+      if (Math.abs(actualDist - expectedDist) / expectedDist > 0.1) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (matches && workDistances.length >= patternLen * 2) {
+      // Found a repeating pattern with variation, return it
+      return pattern;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Analyze repetition workout structure from lap data
  * Used for: Repetition (R) workouts with sets and reps
  *
  * This function analyzes the workout structure to determine:
  * - Number of sets
  * - Number of reps per set
- * - Work interval distance
+ * - Work interval distance(s)
  * - Recovery interval distance
  * - Between-set recovery distance
+ * - Ladder pattern (if work intervals vary)
  *
  * Algorithm:
  * 1. Identify alternating fast/slow pattern by analyzing consecutive laps
  * 2. Work laps: fast (>4.3 m/s), 200-600m
  * 3. Recovery laps: slow (<3.5 m/s), similar distance to work
  * 4. Between-set recovery: long (>600m) slow laps
+ * 5. Detect ladder patterns (e.g., 200m, 200m, 400m repeating)
  */
 export function calculateRepetitionStructure(params: {
   laps: Array<{
@@ -171,14 +214,27 @@ export function calculateRepetitionStructure(params: {
     }
   }
 
-  // Calculate average work distance and round to standard
-  const avgWorkDist = workLaps.reduce((sum, idx) => sum + laps[idx].distance, 0) / workLaps.length;
-  const workDistance = roundToStandardDistance(avgWorkDist);
+  // Get work distances in order and round them
+  const workDistances = workLaps.map(idx => roundToStandardDistance(laps[idx].distance));
+
+  // Detect ladder pattern
+  const ladderPattern = detectLadderPattern(workDistances);
+
+  // Calculate work distance
+  let workDistance: number;
+  if (ladderPattern) {
+    // For ladder, use the first distance in pattern as representative
+    workDistance = ladderPattern[0];
+  } else {
+    // For uniform reps, average all work distances
+    const avgWorkDist = workLaps.reduce((sum, idx) => sum + laps[idx].distance, 0) / workLaps.length;
+    workDistance = roundToStandardDistance(avgWorkDist);
+  }
 
   // Calculate average regular recovery distance and round to standard
   const avgRecoveryDist = regularRecoveryLaps.length > 0
     ? regularRecoveryLaps.reduce((sum, idx) => sum + laps[idx].distance, 0) / regularRecoveryLaps.length
-    : avgWorkDist;
+    : workDistances[0] || 200;
   const recoveryDistance = roundToStandardDistance(avgRecoveryDist);
 
   // Calculate between-set recovery distance
@@ -190,11 +246,13 @@ export function calculateRepetitionStructure(params: {
   let sets = 1;
   let repsPerSet = workLaps.length;
 
-  if (betweenSetRecoveryLaps.length > 0) {
+  if (ladderPattern) {
+    // For ladder patterns, sets = total work intervals / pattern length
+    sets = Math.floor(workLaps.length / ladderPattern.length);
+    repsPerSet = ladderPattern.length;
+  } else if (betweenSetRecoveryLaps.length > 0) {
     // Number of sets = number of between-set recoveries + 1
     sets = betweenSetRecoveryLaps.length + 1;
-
-    // Calculate reps per set by dividing work intervals by sets
     repsPerSet = Math.round(workLaps.length / sets);
   }
 
@@ -204,5 +262,6 @@ export function calculateRepetitionStructure(params: {
     work_distance_meters: workDistance,
     recovery_distance_meters: recoveryDistance,
     between_set_recovery_distance_meters: betweenSetRecovery,
+    ladder_pattern: ladderPattern || undefined,
   };
 }

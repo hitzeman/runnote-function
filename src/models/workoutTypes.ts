@@ -37,6 +37,8 @@ export interface RepetitionWorkoutMetrics {
   work_distance_meters: number;
   recovery_distance_meters: number;
   between_set_recovery_distance_meters: number;
+  /** For ladder/pyramid workouts: pattern of distances per set (e.g., [200, 200, 400]) */
+  ladder_pattern?: number[];
 }
 
 /**

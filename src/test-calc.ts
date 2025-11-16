@@ -92,4 +92,45 @@ if (result2.sets === 1) {
 }
 console.log();
 
+// Test activity 15120301578 (ladder pattern)
+const activity15120301578_laps = [
+  { distance: 198.15, moving_time: 42, average_speed: 4.72 },   // low HR, might exclude
+  { distance: 209.22, moving_time: 81, average_speed: 2.58 },   // recovery
+  { distance: 411.55, moving_time: 85, average_speed: 4.84 },   // work 400m
+  { distance: 384.1, moving_time: 147, average_speed: 2.61 },   // recovery
+  { distance: 205.78, moving_time: 41, average_speed: 5.02 },   // work 200m
+  { distance: 196.96, moving_time: 84, average_speed: 2.34 },   // recovery
+  { distance: 199.77, moving_time: 41, average_speed: 4.87 },   // work 200m
+  { distance: 200.1, moving_time: 99, average_speed: 2.02 },    // recovery
+  { distance: 394.95, moving_time: 82, average_speed: 4.82 },   // work 400m
+  { distance: 404.81, moving_time: 154, average_speed: 2.63 },  // recovery
+  { distance: 203.96, moving_time: 42, average_speed: 4.86 },   // work 200m
+  { distance: 193.12, moving_time: 82, average_speed: 2.36 },   // recovery
+  { distance: 207.76, moving_time: 42, average_speed: 4.95 },   // work 200m
+  { distance: 187.38, moving_time: 92, average_speed: 2.04 },   // recovery
+  { distance: 392.14, moving_time: 82, average_speed: 4.78 },   // work 400m
+  { distance: 404.78, moving_time: 153, average_speed: 2.65 },  // recovery
+  { distance: 202.12, moving_time: 42, average_speed: 4.81 },   // work 200m
+  { distance: 198.06, moving_time: 82, average_speed: 2.42 },   // recovery
+  { distance: 201.02, moving_time: 42, average_speed: 4.79 },   // work 200m
+  { distance: 198.76, moving_time: 116, average_speed: 1.71 },  // recovery
+  { distance: 393.38, moving_time: 83, average_speed: 4.74 },   // work 400m
+  { distance: 1609.3, moving_time: 527, average_speed: 3.05 },  // cooldown
+  { distance: 1609.3, moving_time: 510, average_speed: 3.16 },  // cooldown
+  { distance: 43.28, moving_time: 16, average_speed: 2.71 }     // cooldown
+];
+
+console.log('Activity 15120301578 (ladder pattern):');
+console.log('Expected: 4 x(400m, 200m, 200m) R w/ equal jog OR 3 x(400m, 200m, 200m) R');
+const laps3 = activity15120301578_laps.slice(2, -3); // exclude first 2 and last 3
+const result3 = calculateRepetitionStructure({ laps: laps3 });
+console.log('Result:', result3);
+if (result3.ladder_pattern) {
+  const patternStr = result3.ladder_pattern.join('m, ') + 'm';
+  console.log(`Formatted: ${result3.sets} x(${patternStr}) R w/ equal jog`);
+} else {
+  console.log(`Formatted: ${result3.sets} x(${result3.reps_per_set} x ${result3.work_distance_meters}m R w/${result3.recovery_distance_meters}m jog)`);
+}
+console.log();
+
 console.log('='.repeat(80));

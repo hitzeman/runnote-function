@@ -97,6 +97,33 @@ export function calculateIntervalMetrics(params: {
 }
 
 /**
+ * Round distance to nearest standard running distance
+ */
+function roundToStandardDistance(meters: number): number {
+  // Common running distances
+  const standards = [100, 200, 300, 400, 600, 800, 1000, 1200, 1600];
+
+  // Find closest standard distance
+  let closest = standards[0];
+  let minDiff = Math.abs(meters - closest);
+
+  for (const std of standards) {
+    const diff = Math.abs(meters - std);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = std;
+    }
+  }
+
+  // If within 15% of standard, use it; otherwise round to nearest 100
+  if (minDiff / meters < 0.15) {
+    return closest;
+  }
+
+  return Math.round(meters / 100) * 100;
+}
+
+/**
  * Analyze repetition workout structure from lap data
  * Used for: Repetition (R) workouts with sets and reps
  *
@@ -106,6 +133,12 @@ export function calculateIntervalMetrics(params: {
  * - Work interval distance
  * - Recovery interval distance
  * - Between-set recovery distance
+ *
+ * Algorithm:
+ * 1. Identify alternating fast/slow pattern by analyzing consecutive laps
+ * 2. Work laps: fast (>4.3 m/s), 200-600m
+ * 3. Recovery laps: slow (<3.5 m/s), similar distance to work
+ * 4. Between-set recovery: long (>600m) slow laps
  */
 export function calculateRepetitionStructure(params: {
   laps: Array<{
@@ -114,32 +147,54 @@ export function calculateRepetitionStructure(params: {
     average_speed: number;
   }>;
 }): RepetitionWorkoutMetrics {
-  // Find work and recovery laps based on speed differential
-  // Work laps are significantly faster than recovery laps
-  const avgSpeed = params.laps.reduce((sum, lap) => sum + lap.average_speed, 0) / params.laps.length;
-  const workLaps = params.laps.filter(lap => lap.average_speed > avgSpeed);
-  const recoveryLaps = params.laps.filter(lap => lap.average_speed <= avgSpeed);
+  const laps = params.laps;
 
-  // Determine work distance (most common distance among fast laps)
-  const workDistance = Math.round(workLaps[0]?.distance || 200);
+  // Identify work laps (fast, short) and recovery types
+  const workLaps: number[] = [];
+  const regularRecoveryLaps: number[] = [];
+  const betweenSetRecoveryLaps: number[] = [];
 
-  // Determine recovery distance (most common short distance among slow laps)
-  const shortRecoveryLaps = recoveryLaps.filter(lap => lap.distance < 400);
-  const recoveryDistance = Math.round(shortRecoveryLaps[0]?.distance || workDistance);
+  for (let i = 0; i < laps.length; i++) {
+    const lap = laps[i];
 
-  // Find between-set recovery (long slow laps)
-  const longRecoveryLaps = recoveryLaps.filter(lap => lap.distance >= 600);
-  const betweenSetRecovery = longRecoveryLaps.length > 0
-    ? Math.round(longRecoveryLaps[0].distance)
+    // Work lap criteria: fast AND short
+    if (lap.average_speed > 4.3 && lap.distance >= 180 && lap.distance <= 600) {
+      workLaps.push(i);
+    }
+    // Between-set recovery: slow AND long
+    else if (lap.average_speed < 3.5 && lap.distance > 600) {
+      betweenSetRecoveryLaps.push(i);
+    }
+    // Regular recovery: slow AND short
+    else if (lap.average_speed < 3.5 && lap.distance >= 150 && lap.distance <= 600) {
+      regularRecoveryLaps.push(i);
+    }
+  }
+
+  // Calculate average work distance and round to standard
+  const avgWorkDist = workLaps.reduce((sum, idx) => sum + laps[idx].distance, 0) / workLaps.length;
+  const workDistance = roundToStandardDistance(avgWorkDist);
+
+  // Calculate average regular recovery distance and round to standard
+  const avgRecoveryDist = regularRecoveryLaps.length > 0
+    ? regularRecoveryLaps.reduce((sum, idx) => sum + laps[idx].distance, 0) / regularRecoveryLaps.length
+    : avgWorkDist;
+  const recoveryDistance = roundToStandardDistance(avgRecoveryDist);
+
+  // Calculate between-set recovery distance
+  const betweenSetRecovery = betweenSetRecoveryLaps.length > 0
+    ? roundToStandardDistance(laps[betweenSetRecoveryLaps[0]].distance)
     : 0;
 
   // Calculate sets and reps per set
   let sets = 1;
   let repsPerSet = workLaps.length;
 
-  if (longRecoveryLaps.length > 0) {
-    // If there are long recovery laps, they separate sets
-    sets = longRecoveryLaps.length + 1;
+  if (betweenSetRecoveryLaps.length > 0) {
+    // Number of sets = number of between-set recoveries + 1
+    sets = betweenSetRecoveryLaps.length + 1;
+
+    // Calculate reps per set by dividing work intervals by sets
     repsPerSet = Math.round(workLaps.length / sets);
   }
 

@@ -36,14 +36,19 @@ LONG RUN DETECTION (first priority):
 - Skip all other detection steps
 
 REPETITION RUN DETECTION (second priority):
-- IMPORTANT: Analyze the activity.laps array (NOT splits_metric or splits_standard)
-- Look for alternating pattern of very short, fast work intervals with equal-distance recovery
-- Work intervals: 200-600m distance, pace zones 5-6 (very fast), average_speed > 4.3 m/s
-- Recovery intervals: same distance as work intervals (200-600m), much slower pace (zones 1-2), average_speed < 3.5 m/s
-- Pattern in laps array: fast lap, slow lap, fast lap, slow lap, etc.
-- May include longer recovery laps (>600m) between sets
-- First lap may be warmup (>1000m, pace zone 1) - exclude it
-- Last lap may be cooldown (>1000m, pace zone 1) - exclude it
+- CRITICAL: R workouts have DECEIVING overall stats (avg HR 135-145, avg speed 2.8-3.2 m/s look like Easy runs)
+- MUST analyze the activity.laps array BEFORE considering overall stats (NOT splits_metric or splits_standard)
+- Look for alternating pattern of very short, fast work intervals with SIMILAR-distance recovery intervals
+- **Work intervals**: 200-600m distance, average_speed > 4.3 m/s (ideally 4.5-5.1 m/s = ~5:15-5:40/mile pace)
+- **Recovery intervals**: SIMILAR distance to work intervals (180-600m), average_speed < 3.5 m/s (often 1.2-2.9 m/s = slow jog/walk)
+- **Key distinction from Tempo**: Recovery distance is SIMILAR to work distance (not time-based like 60-second recoveries)
+- **Key distinction from Easy**: Alternating fast/slow pattern with speed differential > 1.5 m/s between consecutive laps
+- Pattern in laps array: fast lap (~200m @4.5+ m/s), slow lap (~200m @2.0 m/s), fast lap, slow lap, etc.
+- Require at least 6 work intervals (12 laps total including recoveries) to confirm pattern
+- May include longer recovery laps (>600m, <3.5 m/s) between sets - these are normal
+- First lap may be warmup (>1000m, speed <3.0 m/s) - exclude it
+- Last lap(s) may be cooldown (>1000m, speed <3.5 m/s) - exclude them
+- Max HR will be high (165-180 bpm) even if avg HR is moderate (135-145 bpm)
 - If found, extract ALL workout laps (warmup/cooldown removed) and call calculateRepetitionStructure ONCE
 - Skip all other detection steps
 
@@ -59,7 +64,11 @@ CONTINUOUS TEMPO DETECTION (fourth priority):
 - If found, extract those specific laps and call calculateTempoBlockMetrics ONCE
 
 EASY RUN DETECTION (default):
-- No sustained workout blocks, HR in zones 1-2, consistent pace
+- IMPORTANT: Only classify as Easy if NO interval patterns detected above
+- Check that laps do NOT show alternating fast/slow pattern (no speed differentials > 1.5 m/s between consecutive laps)
+- Consistent pace throughout, no significant speed variations in laps
+- HR in zones 1-2 (115-145 bpm), consistent throughout run
+- Max HR should not exceed 160 bpm (if it does, likely intervals with low recovery)
 - Extract overall activity stats and call calculateRunMetrics ONCE
 
 OUTPUT FORMAT:

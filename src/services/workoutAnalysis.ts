@@ -321,7 +321,7 @@ ${JSON.stringify(activity)}`,
 
   // Function calling loop
   let response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
     temperature: 0.2,
     messages: messages,
     tools: tools,
@@ -374,7 +374,7 @@ ${JSON.stringify(activity)}`,
 
     // Get next response from the model
     response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       temperature: 0.2,
       messages: messages,
       tools: tools,

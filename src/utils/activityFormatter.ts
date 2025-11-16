@@ -36,7 +36,7 @@ export function formatWorkoutSummary(result: WorkoutAnalysisResult): string {
     // Build the workout structure description
     let description: string;
     if (sets === 1) {
-      // Single set: "8 x 200m R w/200m jog"
+      // Single set: "10 x 200m R w/200m jog"
       description = `${reps_per_set} x ${workDist} R w/${recDist} jog`;
     } else {
       // Multiple sets with between-set recovery
@@ -44,13 +44,8 @@ export function formatWorkoutSummary(result: WorkoutAnalysisResult): string {
         ? `${between_set_recovery_distance_meters}m`
         : recDist;
 
-      // Format: "2 sets of (8 x 200m R w/200m jog) w/800m jog"
-      // or "2 x(8 x 200m R w/200m jog) w/800m jog"
-      if (sets > 1) {
-        description = `${sets} sets of (${reps_per_set} x ${workDist} R w/${recDist} jog) w/${betweenSetDist} jog`;
-      } else {
-        description = `${reps_per_set} x ${workDist} R w/${recDist} jog`;
-      }
+      // Format: "2 x(8 x 200m R w/200m jog) w/800m jog"
+      description = `${sets} x(${reps_per_set} x ${workDist} R w/${recDist} jog) w/${betweenSetDist} jog`;
     }
 
     return description;

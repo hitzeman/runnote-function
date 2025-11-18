@@ -124,14 +124,67 @@ function roundToStandardDistance(meters: number): number {
 }
 
 /**
+ * Find repeating pattern in an array of values
+ * Returns the pattern and number of complete repetitions, or null if no pattern found
+ *
+ * Note: Prefers shorter patterns over longer ones (e.g., [200,200,400] over [200,200,400,200,200,400])
+ * Allows for incomplete patterns at the end (e.g., [200,400,200,200,400,200,200,400] has pattern [200,400,200] x 2 + partial)
+ */
+function findRepeatingPattern(arr: number[]): {
+  pattern: number[];
+  sets: number;
+} | null {
+  // Try pattern lengths from 1 to half the array length
+  // Start from SMALLEST patterns to prefer simpler repeating units
+  for (let len = 1; len <= Math.floor(arr.length / 2); len++) {
+    const pattern = arr.slice(0, len);
+    let fullSets = 0;
+    let isValidPattern = true;
+
+    // Check if this pattern repeats throughout the array
+    for (let i = 0; i < arr.length; i += len) {
+      const segment = arr.slice(i, i + len);
+
+      if (segment.length === len) {
+        // Full segment - check if it matches the pattern
+        if (JSON.stringify(segment) === JSON.stringify(pattern)) {
+          fullSets++;
+        } else {
+          // Pattern doesn't match - not a valid pattern
+          isValidPattern = false;
+          break;
+        }
+      } else if (segment.length > 0) {
+        // Partial segment at the end - this is OK for repetition workouts
+        // (athlete might not complete the final rep)
+        // Just verify the partial matches the start of the pattern
+        const partialPattern = pattern.slice(0, segment.length);
+        if (JSON.stringify(segment) !== JSON.stringify(partialPattern)) {
+          isValidPattern = false;
+        }
+        // Don't count the partial set
+        break;
+      }
+    }
+
+    // If we found at least 2 complete repetitions of this pattern, return it
+    if (isValidPattern && fullSets >= 2) {
+      return { pattern, sets: fullSets };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Analyze repetition workout structure from lap data
  * Used for: Repetition (R) workouts with sets and reps
  *
  * This function analyzes the workout structure to determine:
  * - Number of sets
- * - Number of reps per set
- * - Work interval distance
- * - Recovery interval distance
+ * - Number of reps per set (or pattern of reps)
+ * - Work interval distance(s)
+ * - Recovery interval distance(s)
  * - Between-set recovery distance
  *
  * Algorithm:
@@ -139,6 +192,7 @@ function roundToStandardDistance(meters: number): number {
  * 2. Work laps: fast (>4.3 m/s), 200-600m
  * 3. Recovery laps: slow (<3.5 m/s), similar distance to work
  * 4. Between-set recovery: long (>600m) slow laps
+ * 5. Detect repeating patterns in work/recovery distances (e.g., 200, 200, 400)
  */
 export function calculateRepetitionStructure(params: {
   laps: Array<{
@@ -161,41 +215,122 @@ export function calculateRepetitionStructure(params: {
     if (lap.average_speed > 4.3 && lap.distance >= 180 && lap.distance <= 600) {
       workLaps.push(i);
     }
-    // Between-set recovery: slow AND long
-    else if (lap.average_speed < 3.5 && lap.distance > 600) {
-      betweenSetRecoveryLaps.push(i);
-    }
     // Regular recovery: slow AND short
     else if (lap.average_speed < 3.5 && lap.distance >= 150 && lap.distance <= 600) {
       regularRecoveryLaps.push(i);
     }
+    // Between-set recovery: slow AND long, BUT must be BETWEEN work intervals
+    // (not at the beginning or end, which would be warmup/cooldown)
+    else if (
+      lap.average_speed < 3.5 &&
+      lap.distance > 600 &&
+      lap.distance <= 2000 && // Cap at 2000m to exclude warmup/cooldown
+      i > 0 && // Not the first lap (would be warmup)
+      i < laps.length - 3 // Not in the last 3 laps (would be cooldown)
+    ) {
+      // Check if there are work laps both before and after this lap
+      const hasWorkBefore = workLaps.some(idx => idx < i);
+      const hasWorkAfter = laps.slice(i + 1).some(
+        lap => lap.average_speed > 4.3 && lap.distance >= 180 && lap.distance <= 600
+      );
+
+      if (hasWorkBefore && hasWorkAfter) {
+        betweenSetRecoveryLaps.push(i);
+      }
+    }
   }
 
-  // Calculate average work distance and round to standard
-  const avgWorkDist = workLaps.reduce((sum, idx) => sum + laps[idx].distance, 0) / workLaps.length;
-  const workDistance = roundToStandardDistance(avgWorkDist);
+  // Round all work distances to standard distances
+  const workDistances = workLaps.map((idx) =>
+    roundToStandardDistance(laps[idx].distance)
+  );
 
-  // Calculate average regular recovery distance and round to standard
-  const avgRecoveryDist = regularRecoveryLaps.length > 0
-    ? regularRecoveryLaps.reduce((sum, idx) => sum + laps[idx].distance, 0) / regularRecoveryLaps.length
-    : avgWorkDist;
-  const recoveryDistance = roundToStandardDistance(avgRecoveryDist);
+  // Round all recovery distances to standard distances
+  const recoveryDistances = regularRecoveryLaps.map((idx) =>
+    roundToStandardDistance(laps[idx].distance)
+  );
 
   // Calculate between-set recovery distance
-  const betweenSetRecovery = betweenSetRecoveryLaps.length > 0
-    ? roundToStandardDistance(laps[betweenSetRecoveryLaps[0]].distance)
-    : 0;
+  const betweenSetRecovery =
+    betweenSetRecoveryLaps.length > 0
+      ? roundToStandardDistance(laps[betweenSetRecoveryLaps[0]].distance)
+      : 0;
+
+  // Detect repeating patterns in work intervals
+  const workPattern = findRepeatingPattern(workDistances);
+
+  // Detect repeating patterns in recovery intervals
+  const recoveryPattern = findRepeatingPattern(recoveryDistances);
 
   // Calculate sets and reps per set
   let sets = 1;
-  let repsPerSet = workLaps.length;
+  let repsPerSet: number;
+  let workDistance: number | number[];
+  let recoveryDistance: number | number[];
 
   if (betweenSetRecoveryLaps.length > 0) {
     // Number of sets = number of between-set recoveries + 1
     sets = betweenSetRecoveryLaps.length + 1;
+  }
 
-    // Calculate reps per set by dividing work intervals by sets
-    repsPerSet = Math.round(workLaps.length / sets);
+  if (workPattern) {
+    // We found a repeating pattern in work distances
+    if (workPattern.pattern.length === 1) {
+      // Uniform pattern: all work intervals are the same distance
+      workDistance = workPattern.pattern[0];
+
+      if (betweenSetRecoveryLaps.length > 0) {
+        // We have between-set recoveries, so calculate reps per set
+        sets = betweenSetRecoveryLaps.length + 1;
+        repsPerSet = Math.round(workPattern.sets / sets);
+      } else {
+        // No between-set recoveries, so it's a single set
+        sets = 1;
+        repsPerSet = workPattern.sets;
+      }
+    } else {
+      // Mixed pattern: work intervals vary (e.g., 200, 200, 400)
+      workDistance = workPattern.pattern;
+      repsPerSet = workPattern.pattern.length;
+
+      // Number of sets = number of times the pattern repeats
+      if (betweenSetRecoveryLaps.length > 0) {
+        // We have explicit between-set recovery markers
+        sets = betweenSetRecoveryLaps.length + 1;
+      } else {
+        // No between-set recovery, pattern repeats = sets
+        sets = workPattern.sets;
+      }
+    }
+  } else {
+    // No repeating pattern found - fall back to averaging
+    const avgWorkDist =
+      workDistances.reduce((sum, d) => sum + d, 0) / workDistances.length;
+    workDistance = roundToStandardDistance(avgWorkDist);
+
+    if (betweenSetRecoveryLaps.length > 0) {
+      sets = betweenSetRecoveryLaps.length + 1;
+      repsPerSet = Math.round(workLaps.length / sets);
+    } else {
+      sets = 1;
+      repsPerSet = workLaps.length;
+    }
+  }
+
+  // Handle recovery distances
+  if (recoveryPattern && recoveryPattern.pattern.length > 1) {
+    // Mixed recovery pattern
+    recoveryDistance = recoveryPattern.pattern;
+  } else if (recoveryDistances.length > 0) {
+    // Uniform recovery - average them
+    const avgRecoveryDist =
+      recoveryDistances.reduce((sum, d) => sum + d, 0) / recoveryDistances.length;
+    recoveryDistance = roundToStandardDistance(avgRecoveryDist);
+  } else {
+    // No recovery laps found - default to work distance
+    recoveryDistance = Array.isArray(workDistance)
+      ? workDistance[0]
+      : workDistance;
   }
 
   return {

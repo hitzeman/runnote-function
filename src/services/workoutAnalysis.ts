@@ -304,9 +304,13 @@ const tools = [
 
 /**
  * Analyze a Strava activity and return structured workout classification
+ *
+ * @param activity Strava activity data
+ * @param model OpenAI model to use (defaults to gpt-4o, use gpt-4o-mini for easy runs)
  */
 export async function analyzeWorkout(
-  activity: Activity
+  activity: Activity,
+  model: 'gpt-4o' | 'gpt-4o-mini' = 'gpt-4o'
 ): Promise<WorkoutAnalysisResult> {
   const messages: any[] = [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -321,7 +325,7 @@ ${JSON.stringify(activity)}`,
 
   // Function calling loop
   let response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: model,
     temperature: 0.2,
     messages: messages,
     tools: tools,
@@ -374,7 +378,7 @@ ${JSON.stringify(activity)}`,
 
     // Get next response from the model
     response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: model,
       temperature: 0.2,
       messages: messages,
       tools: tools,

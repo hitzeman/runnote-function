@@ -14,6 +14,7 @@ import {
 import { TokenRow } from '../shared/tokenStore';
 import { Activity } from '../models/activity.model';
 import { analyzeWorkout } from '../services/workoutAnalysis';
+import { preDetectEasyRun } from '../services/workoutPreDetection';
 import {
   createActivityUpdate,
   applyRunNoteToDescription,
@@ -141,8 +142,18 @@ app.http('webhook', {
       );
       rec = updatedRec;
 
-      // Analyze workout with AI
-      const workoutResult = await analyzeWorkout(activity);
+      // Pre-detect if this is an easy run to optimize model selection
+      const preDetection = preDetectEasyRun(activity);
+      const selectedModel = preDetection.isEasyRun ? 'gpt-4o-mini' : 'gpt-4o';
+
+      ctx.log(
+        `Pre-detection: ${preDetection.isEasyRun ? 'Easy Run' : 'Workout'} ` +
+          `(confidence: ${(preDetection.confidence * 100).toFixed(0)}%) - ` +
+          `${preDetection.reason}. Using model: ${selectedModel}`
+      );
+
+      // Analyze workout with AI (using optimized model selection)
+      const workoutResult = await analyzeWorkout(activity, selectedModel);
 
       // Create activity update payload
       const updates = createActivityUpdate(activity.description, workoutResult);

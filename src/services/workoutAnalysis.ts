@@ -178,8 +178,7 @@ const tools = [
         properties: {
           laps: {
             type: 'array',
-            description:
-              'Array of work interval laps only (not recovery laps)',
+            description: 'Array of work interval laps only (not recovery laps)',
             items: {
               type: 'object',
               properties: {
@@ -321,7 +320,7 @@ ${JSON.stringify(activity)}`,
 
   // Function calling loop
   let response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-4o-mini',
     temperature: 0.2,
     messages: messages,
     tools: tools,
@@ -374,7 +373,7 @@ ${JSON.stringify(activity)}`,
 
     // Get next response from the model
     response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-4o-mini',
       temperature: 0.2,
       messages: messages,
       tools: tools,

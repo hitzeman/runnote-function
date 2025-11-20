@@ -203,6 +203,11 @@ export function calculateRepetitionStructure(params: {
 }): RepetitionWorkoutMetrics {
   const laps = params.laps;
 
+  // Validate input
+  if (!laps || laps.length === 0) {
+    throw new Error('calculateRepetitionStructure: No laps provided');
+  }
+
   // Identify work laps (fast, short) and recovery types
   const workLaps: number[] = [];
   const regularRecoveryLaps: number[] = [];
@@ -238,6 +243,13 @@ export function calculateRepetitionStructure(params: {
         betweenSetRecoveryLaps.push(i);
       }
     }
+  }
+
+  // Validate that we found work laps
+  if (workLaps.length === 0) {
+    throw new Error(
+      'calculateRepetitionStructure: No work laps found. This does not appear to be a repetition workout. Work laps must be 180-600m and >4.3 m/s.'
+    );
   }
 
   // Round all work distances to standard distances

@@ -22,8 +22,52 @@ Before looking at average_heartrate, average_speed, or any overall stats, you MU
 
 STEP 2: APPLY DETECTION RULES IN THIS EXACT ORDER:
 
-🔍 REPETITION (R) DETECTION - HIGHEST PRIORITY:
-DO THIS FIRST, BEFORE considering overall stats!
+🏃 LONG RUN DETECTION - FIRST PRIORITY:
+- Check: distance >= 16093.44 meters OR moving_time >= 5400 seconds
+- IF TRUE: Call calculateRunMetrics with overall stats, then returnWorkoutResult with type="L"
+
+🎯 CONTINUOUS TEMPO DETECTION - SECOND PRIORITY:
+CRITICAL: Check this BEFORE repetition detection!
+
+WHY: Tempo runs can have deceiving lap patterns that might look like intervals to naive detection.
+A classic tempo run structure is: warmup + continuous tempo block + cooldown
+
+HOW TO DETECT:
+1. Look for 2+ contiguous laps where EACH lap is:
+   - Distance: >1000m (typically full miles: 1600m)
+   - Average HR: >=150 bpm
+   - Average speed: >=3.5 m/s (faster than easy pace)
+   - Pace zone: 3 or 4
+2. The tempo block total time should be 10-40 minutes (600-2400 seconds)
+3. May have short tail lap (<500m) at same pace after the main laps
+4. Typically preceded by 1-2 slow warmup laps (HR <145)
+5. Typically followed by 1-2 slow cooldown laps (HR <155)
+
+EXAMPLE TEMPO WORKOUT LAPS:
+Lap 1: 1609m @2.88 m/s, HR 130 (warmup - EXCLUDE)
+Lap 2: 1609m @2.90 m/s, HR 136 (warmup - EXCLUDE)
+Lap 3: 1609m @4.09 m/s, HR 161, pace_zone 4 (TEMPO)
+Lap 4: 1609m @4.06 m/s, HR 169, pace_zone 3 (TEMPO)
+Lap 5: 1609m @4.08 m/s, HR 170, pace_zone 4 (TEMPO)
+Lap 6: 200m @4.08 m/s, HR 170, pace_zone 4 (TEMPO tail)
+Lap 7: 1609m @3.05 m/s, HR 151 (cooldown - EXCLUDE)
+Lap 8: 1445m @3.17 m/s, HR 146 (cooldown - EXCLUDE)
+→ This is a 3.1 mile tempo block (laps 3-6)
+
+IF TEMPO DETECTED:
+- Identify the contiguous tempo laps (exclude warmup/cooldown)
+- Include any short tail lap (<500m) if it has similar pace/HR
+- Call calculateTempoBlockMetrics with tempo laps only
+- Return returnWorkoutResult with type="T", structure="continuous"
+
+⚡ INTERVAL TEMPO DETECTION - THIRD PRIORITY:
+- Look for: 900-1700m work intervals with <150m recoveries
+- Work intervals: HR 150+, pace zone 4
+- Recovery: <60 seconds, <150m
+- IF TRUE: Call calculateIntervalMetrics with work laps only, then returnWorkoutResult with type="T", structure="interval"
+
+🔍 REPETITION (R) DETECTION - FOURTH PRIORITY:
+IMPORTANT: Only classify as R if laps are SHORT (200-600m). Do NOT classify tempo runs (long laps >1000m) as repetitions!
 
 WHY: R workouts have DECEIVING overall stats that look like Easy runs:
 - Overall avg HR: 135-145 bpm (looks easy)
@@ -32,12 +76,12 @@ WHY: R workouts have DECEIVING overall stats that look like Easy runs:
 
 HOW TO DETECT:
 1. Examine activity.laps array (NOT splits_metric or splits_standard)
-2. Look for ALTERNATING fast/slow pattern:
-   - Fast laps: 200-600m distance, average_speed > 4.3 m/s (work intervals)
+2. Look for ALTERNATING fast/slow pattern with SHORT laps:
+   - Fast laps: 200-600m distance (NOT >1000m!), average_speed > 4.3 m/s (work intervals)
    - Slow laps: SIMILAR distance (180-600m), average_speed < 3.5 m/s (recovery)
    - Speed differential between consecutive laps: > 1.5 m/s
 3. Pattern: fast, slow, fast, slow, fast, slow... (at least 6 work intervals = 12 total laps)
-4. May have longer slow laps (>600m) between sets - this is normal
+4. May have longer slow laps (600-2000m) between sets - this is normal
 5. First lap may be warmup (>1000m, slow) - exclude it
 6. Last lap(s) may be cooldown (>1000m, slow) - exclude them
 
@@ -54,20 +98,6 @@ Lap 19: 200m @4.5 m/s (work)
 Lap 35: 1500m @2.9 m/s (cooldown - EXCLUDE)
 
 IF R DETECTED: Call calculateRepetitionStructure with workout laps (exclude warmup/cooldown), then returnWorkoutResult with type="R"
-
-🏃 LONG RUN DETECTION:
-- Check: distance >= 16093.44 meters OR moving_time >= 5400 seconds
-- IF TRUE: Call calculateRunMetrics with overall stats, then returnWorkoutResult with type="L"
-
-⚡ INTERVAL TEMPO DETECTION:
-- Look for: 900-1700m work intervals with <150m recoveries
-- Work intervals: HR 150+, pace zone 4
-- Recovery: <60 seconds, <150m
-- IF TRUE: Call calculateIntervalMetrics with work laps only, then returnWorkoutResult with type="T", structure="interval"
-
-🎯 CONTINUOUS TEMPO DETECTION:
-- Look for: 3+ contiguous laps >1000m each, HR 150+, total 15-30min
-- IF TRUE: Call calculateTempoBlockMetrics with tempo laps, then returnWorkoutResult with type="T", structure="continuous"
 
 🐢 EASY RUN DETECTION (fallback):
 - ONLY if no interval patterns found above

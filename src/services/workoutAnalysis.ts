@@ -22,12 +22,8 @@ Before looking at average_heartrate, average_speed, or any overall stats, you MU
 
 STEP 2: APPLY DETECTION RULES IN THIS EXACT ORDER:
 
-🏃 LONG RUN DETECTION - FIRST PRIORITY:
-- Check: distance >= 16093.44 meters OR moving_time >= 5400 seconds
-- IF TRUE: Call calculateRunMetrics with overall stats, then returnWorkoutResult with type="L"
-
-🎯 CONTINUOUS TEMPO DETECTION - SECOND PRIORITY:
-CRITICAL: Check this BEFORE repetition detection!
+🎯 CONTINUOUS TEMPO DETECTION - FIRST PRIORITY:
+CRITICAL: Check this FIRST for structured workouts!
 
 WHY: Tempo runs can have deceiving lap patterns that might look like intervals to naive detection.
 A classic tempo run structure is: warmup + continuous tempo block + cooldown
@@ -60,11 +56,28 @@ IF TEMPO DETECTED:
 - Call calculateTempoBlockMetrics with tempo laps only
 - Return returnWorkoutResult with type="T", structure="continuous"
 
-⚡ INTERVAL TEMPO DETECTION - THIRD PRIORITY:
+⚡ INTERVAL TEMPO DETECTION - SECOND PRIORITY:
 - Look for: 900-1700m work intervals with <150m recoveries
 - Work intervals: HR 150+, pace zone 4
 - Recovery: <60 seconds, <150m
 - IF TRUE: Call calculateIntervalMetrics with work laps only, then returnWorkoutResult with type="T", structure="interval"
+
+🏃 LONG RUN DETECTION - THIRD PRIORITY:
+IMPORTANT: Only classify as Long Run if BOTH conditions are met:
+1. NO structured workout pattern found above (no tempo, no intervals, no repetitions)
+2. Distance >= 16093.44 meters (10 miles) OR moving_time >= 5400 seconds (90 minutes)
+
+NEGATIVE EXAMPLES (NOT long runs):
+- 7 miles in 55 minutes with tempo block → TEMPO, not Long Run
+- 8 miles easy → EASY, not Long Run (under 10 miles)
+- 9.5 miles in 70 minutes → EASY, not Long Run (under 10 miles AND under 90 minutes)
+
+POSITIVE EXAMPLES (ARE long runs):
+- 11 miles easy → Long Run (over 10 miles)
+- 9 miles in 95 minutes → Long Run (over 90 minutes)
+- 13 miles in 2 hours → Long Run (over 10 miles)
+
+IF LONG RUN: Call calculateRunMetrics with overall stats, then returnWorkoutResult with type="L"
 
 🔍 REPETITION (R) DETECTION - FOURTH PRIORITY:
 IMPORTANT: Only classify as R if laps are SHORT (200-600m). Do NOT classify tempo runs (long laps >1000m) as repetitions!
@@ -99,7 +112,7 @@ Lap 35: 1500m @2.9 m/s (cooldown - EXCLUDE)
 
 IF R DETECTED: Call calculateRepetitionStructure with workout laps (exclude warmup/cooldown), then returnWorkoutResult with type="R"
 
-🐢 EASY RUN DETECTION (fallback):
+🐢 EASY RUN DETECTION - FIFTH PRIORITY (fallback):
 - ONLY if no interval patterns found above
 - Check: NO alternating fast/slow in laps (speed differential < 1.5 m/s between consecutive laps)
 - Consistent pace, HR 115-145, max HR < 160

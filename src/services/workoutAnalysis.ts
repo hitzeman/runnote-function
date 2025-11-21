@@ -403,11 +403,64 @@ const tools = [
 ];
 
 /**
+ * Check if activity is an easy run based on pace zones
+ * Easy runs have ALL laps in pace zones 1 or 2
+ */
+function isEasyRun(activity: Activity): boolean {
+  // Must have laps data
+  if (!activity.laps || activity.laps.length === 0) {
+    return false;
+  }
+
+  // Check if ALL laps are in pace zones 1 or 2
+  // This is the key differentiator:
+  // - Easy runs: all laps in zones 1-2
+  // - Tempo runs: have laps in zones 3-4
+  // - Repetition runs: have laps in zones 5-6
+  return activity.laps.every(
+    (lap) => lap.pace_zone === 1 || lap.pace_zone === 2
+  );
+}
+
+/**
+ * Check if activity is a long run (>= 10 miles or >= 90 minutes)
+ */
+function isLongRun(activity: Activity): boolean {
+  const TEN_MILES_METERS = 16093.44;
+  const NINETY_MINUTES_SECONDS = 5400;
+
+  return (
+    activity.distance >= TEN_MILES_METERS ||
+    activity.moving_time >= NINETY_MINUTES_SECONDS
+  );
+}
+
+/**
  * Analyze a Strava activity and return structured workout classification
  */
 export async function analyzeWorkout(
   activity: Activity
 ): Promise<WorkoutAnalysisResult> {
+  // STEP 1: Check for easy run FIRST (most common, most cost-effective)
+  // Easy runs have ALL laps in pace zones 1 or 2
+  if (isEasyRun(activity)) {
+    const metrics = calculateRunMetrics({
+      distance_meters: activity.distance,
+      moving_time_seconds: activity.moving_time,
+      average_heartrate: activity.average_heartrate,
+    });
+
+    // Distinguish between Long Run and Easy Run
+    const type = isLongRun(activity) ? 'L' : 'E';
+
+    return {
+      type: type,
+      metrics: metrics,
+    };
+  }
+
+  // STEP 2: Use OpenAI for complex workouts (tempo, repetition, VO2max)
+  // These have laps in pace zones 3+ and need detailed analysis
   const messages: any[] = [
     { role: 'system', content: SYSTEM_PROMPT },
     {
@@ -499,6 +552,18 @@ ${JSON.stringify(activity)}`,
     }
   }
 
-  // Last resort fallback
-  throw new Error('Failed to analyze workout: no calculation results');
+  // Last resort fallback: default to easy run
+  // If OpenAI fails or returns nothing, assume it's an easy run
+  const metrics = calculateRunMetrics({
+    distance_meters: activity.distance,
+    moving_time_seconds: activity.moving_time,
+    average_heartrate: activity.average_heartrate,
+  });
+
+  const type = isLongRun(activity) ? 'L' : 'E';
+
+  return {
+    type: type,
+    metrics: metrics,
+  };
 }

@@ -35,12 +35,20 @@ A TEMPO RUN has this structure:
 - 1-2 cooldown laps: slower pace, HR drops
 
 TEMPO DETECTION ALGORITHM:
-1. Scan laps array for consecutive "hard" laps (HR >=150, speed >=3.5, distance >1000m)
-2. If you find 2+ consecutive hard laps = TEMPO BLOCK FOUND
-3. Count up the preceding slow laps (warmup) and following slow laps (cooldown)
-4. Extract just the tempo laps (exclude warmup/cooldown)
-5. Call calculateTempoBlockMetrics(tempo_laps)
-6. Return type="T", structure="continuous"
+1. Scan activity.laps array (NOT splits_metric or splits_standard) for consecutive "hard" laps
+2. Hard lap criteria: ALL of these must be true:
+   - average_heartrate >= 150 bpm
+   - average_speed >= 3.5 m/s
+   - distance >= 1000m (this is for main tempo laps)
+   - pace_zone is 3 or 4
+3. Find the FIRST hard lap (this starts the tempo block)
+4. Find consecutive hard laps after it (these continue the tempo block)
+5. Check if there's a SHORT tail lap immediately after (<500m, same speed/HR) - include it!
+6. All laps BEFORE the first hard lap = warmup (EXCLUDE)
+7. All laps AFTER the last hard/tail lap = cooldown (EXCLUDE)
+8. Extract ONLY the tempo laps (hard laps + tail lap if present)
+9. Call calculateTempoBlockMetrics with ONLY these laps
+10. Return type="T", structure="continuous"
 
 CONCRETE EXAMPLE - THIS IS A TEMPO RUN:
 Activity: 11301m (7 miles), 3334 seconds (55 min), avg HR 150
@@ -55,12 +63,20 @@ Laps:
   Lap 8: 1445m, 3.17 m/s, HR 146 ← cooldown
 
 Analysis:
-- Laps 3-6 are consecutive hard laps (HR 160-170, pace zones 3-4, >1000m each)
-- This is a TEMPO BLOCK of 5009m (3.1 miles)
-- Call: calculateTempoBlockMetrics([lap3, lap4, lap5, lap6])
-- Return: type="T", structure="continuous"
-- ❌ DO NOT classify as Long Run (even though 7 miles)
-- ❌ DO NOT use overall stats (they are diluted by warmup/cooldown)
+- Scan activity.laps array:
+  * Lap 1-2: HR <145, slow → WARMUP (exclude)
+  * Lap 3: 1609m, HR 160, pace_zone 4 → FIRST HARD LAP (include)
+  * Lap 4: 1609m, HR 169, pace_zone 3 → hard lap (include)
+  * Lap 5: 1609m, HR 170, pace_zone 4 → hard lap (include)
+  * Lap 6: 200m, HR 170, pace_zone 4 → short tail at same effort (include)
+  * Lap 7-8: HR drops, slower → COOLDOWN (exclude)
+- Tempo laps: [lap3, lap4, lap5, lap6] (indices 2, 3, 4, 5 in zero-indexed array)
+- CRITICAL: Pass these 4 lap objects to calculateTempoBlockMetrics
+- Tempo block totals: 1609 + 1609 + 1609 + 200 = 5027m (3.12 miles), 1232 seconds
+- Expected result: 3.1 miles at 6:36/mi pace
+- ❌ DO NOT include laps 1-2 (warmup) or laps 7-8 (cooldown)
+- ❌ DO NOT classify as Long Run (even though total is 7 miles)
+- ❌ DO NOT use overall activity stats (diluted by warmup/cooldown)
 
 ⚡ INTERVAL TEMPO DETECTION - SECOND PRIORITY:
 - Look for: 900-1700m work intervals with <150m recoveries
@@ -164,6 +180,14 @@ Call returnWorkoutResult with the structured output.
 ❌ DO NOT ignore max_heartrate (high max_heartrate = intervals, even if avg is low)
 ❌ DO NOT call multiple calculator functions
 ❌ DO NOT skip lap analysis
+❌ DO NOT use splits_metric or splits_standard - ONLY use activity.laps array
+❌ DO NOT include warmup or cooldown laps in tempo calculations
+❌ DO NOT pass ALL laps to calculateTempoBlockMetrics - only pass the tempo laps
+
+⚠️ CRITICAL DATA SOURCE:
+- Always use: activity.laps (the manual lap array)
+- Never use: splits_metric (kilometer splits) or splits_standard (mile splits)
+- The laps array has the correct lap-by-lap data for detecting workout structure
 
 OUTPUT FORMAT:
 {

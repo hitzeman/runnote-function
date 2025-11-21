@@ -148,17 +148,24 @@ export function applyRunNoteToDescription(
 
 /**
  * Create activity update payload with description and title
+ * Note: Title is only updated for Long, Tempo, VO2max, and Repetition runs.
+ * Easy runs keep their original title.
  */
 export function createActivityUpdate(
   existingDescription: string | null | undefined,
   workoutResult: WorkoutAnalysisResult
 ): ActivityUpdate {
   const summary = formatWorkoutSummary(workoutResult);
-  const title = generateActivityTitle(workoutResult.type);
   const description = applyRunNoteToDescription(existingDescription, summary);
 
-  return {
-    description,
-    name: title,
-  };
+  // Only update title for non-Easy runs
+  // Easy runs (type 'E') keep their original title
+  const update: ActivityUpdate = { description };
+
+  if (workoutResult.type !== 'E') {
+    const title = generateActivityTitle(workoutResult.type);
+    update.name = title;
+  }
+
+  return update;
 }

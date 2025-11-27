@@ -5,7 +5,6 @@ import {
   calculateRunMetrics,
   calculateTempoBlockMetrics,
   calculateIntervalMetrics,
-  calculateRepetitionStructure,
 } from './workoutCalculations';
 
 /**
@@ -93,8 +92,7 @@ Analysis:
 Only classify as Long Run if ALL conditions are true:
 1. NO tempo block found (no consecutive hard laps)
 2. NO interval pattern found
-3. NO repetition pattern found
-4. Distance >= 16093.44 meters (10 miles) OR moving_time >= 5400 seconds (90 minutes)
+3. Distance >= 16093.44 meters (10 miles) OR moving_time >= 5400 seconds (90 minutes)
 
 EXPLICIT NEGATIVE EXAMPLES (NOT LONG RUNS):
 ❌ 11301m (7 mi) with laps showing tempo block → TEMPO, NOT Long Run
@@ -108,42 +106,8 @@ POSITIVE EXAMPLES (ARE LONG RUNS):
 
 IF LONG RUN: Call calculateRunMetrics with overall stats, then returnWorkoutResult with type="L"
 
-🔍 REPETITION (R) DETECTION - FOURTH PRIORITY:
-IMPORTANT: Only classify as R if laps are SHORT (200-600m). Do NOT classify tempo runs (long laps >1000m) as repetitions!
-
-WHY: R workouts have DECEIVING overall stats that look like Easy runs:
-- Overall avg HR: 135-145 bpm (looks easy)
-- Overall avg speed: 2.8-3.2 m/s (looks easy)
-- But laps reveal: alternating 200m @4.5-5.0 m/s with 200m @2.0 m/s
-
-HOW TO DETECT:
-1. Examine activity.laps array (NOT splits_metric or splits_standard)
-2. Look for ALTERNATING fast/slow pattern with SHORT laps:
-   - Fast laps: 200-600m distance (NOT >1000m!), average_speed > 4.3 m/s (work intervals)
-   - Slow laps: SIMILAR distance (180-600m), average_speed < 3.5 m/s (recovery)
-   - Speed differential between consecutive laps: > 1.5 m/s
-3. Pattern: fast, slow, fast, slow, fast, slow... (at least 6 work intervals = 12 total laps)
-4. May have longer slow laps (600-2000m) between sets - this is normal
-5. First lap may be warmup (>1000m, slow) - exclude it
-6. Last lap(s) may be cooldown (>1000m, slow) - exclude them
-
-EXAMPLE R WORKOUT LAPS:
-Lap 1: 2500m @2.7 m/s (warmup - EXCLUDE)
-Lap 2: 200m @4.55 m/s (work)
-Lap 3: 200m @2.9 m/s (recovery)
-Lap 4: 200m @4.65 m/s (work)
-Lap 5: 200m @2.5 m/s (recovery)
-...continues for 8 reps...
-Lap 18: 800m @2.9 m/s (between-set recovery)
-Lap 19: 200m @4.5 m/s (work)
-...continues for 8 more reps...
-Lap 35: 1500m @2.9 m/s (cooldown - EXCLUDE)
-
-IF R DETECTED: Call calculateRepetitionStructure with workout laps (exclude warmup/cooldown), then returnWorkoutResult with type="R"
-
-🐢 EASY RUN DETECTION - FIFTH PRIORITY (fallback):
-- ONLY if no interval patterns found above
-- Check: NO alternating fast/slow in laps (speed differential < 1.5 m/s between consecutive laps)
+🐢 EASY RUN DETECTION - FOURTH PRIORITY (fallback):
+- ONLY if no tempo or interval patterns found above
 - Consistent pace, HR 115-145, max HR < 160
 - Call calculateRunMetrics with overall stats, then returnWorkoutResult with type="E"
 
@@ -156,10 +120,6 @@ START HERE:
 │
 ├─ Do laps show interval pattern (work intervals 900-1700m with short recoveries)?
 │  ├─ YES → Extract work laps, call calculateIntervalMetrics, return type="T"
-│  └─ NO → Continue to next check
-│
-├─ Do laps show SHORT repetitions (alternating 200-600m fast/slow)?
-│  ├─ YES → Extract workout laps, call calculateRepetitionStructure, return type="R"
 │  └─ NO → Continue to next check
 │
 ├─ Is distance >= 10 miles OR time >= 90 minutes?
@@ -175,7 +135,6 @@ STEP 5: RETURN RESULTS
 Call returnWorkoutResult with the structured output.
 
 ⚠️ COMMON MISTAKES TO AVOID:
-❌ DO NOT classify as Easy if laps show alternating fast/slow pattern
 ❌ DO NOT look at average_heartrate before checking laps
 ❌ DO NOT ignore max_heartrate (high max_heartrate = intervals, even if avg is low)
 ❌ DO NOT call multiple calculator functions
@@ -191,11 +150,10 @@ Call returnWorkoutResult with the structured output.
 
 OUTPUT FORMAT:
 {
-  "type": "L" | "T" | "E" | "V" | "R",
+  "type": "L" | "T" | "E" | "V",
   "structure": "interval" | "continuous" (only for Tempo runs),
   "metrics": { distance_miles, pace_seconds_per_mile, average_heartrate } (for continuous workouts),
-  "interval_metrics": { interval_count, distance_per_interval_miles, individual_paces_seconds[], average_heartrate } (for interval workouts),
-  "repetition_metrics": { sets, reps_per_set, work_distance_meters, recovery_distance_meters, between_set_recovery_distance_meters } (for repetition workouts)
+  "interval_metrics": { interval_count, distance_per_interval_miles, individual_paces_seconds[], average_heartrate } (for interval workouts)
 }`;
 
 /**
@@ -273,7 +231,7 @@ const tools = [
     function: {
       name: 'calculateIntervalMetrics',
       description:
-        'Calculate accurate metrics for interval workouts from work interval lap data. Use this for interval tempo runs, VO2max intervals, and repetitions. Pass ONLY the work interval laps, not recovery laps.',
+        'Calculate accurate metrics for interval workouts from work interval lap data. Use this for interval tempo runs and VO2max intervals. Pass ONLY the work interval laps, not recovery laps.',
       parameters: {
         type: 'object',
         properties: {
@@ -307,43 +265,6 @@ const tools = [
   {
     type: 'function' as const,
     function: {
-      name: 'calculateRepetitionStructure',
-      description:
-        'Analyze repetition workout structure from lap data. Use this for repetition (R) workouts. Pass all workout laps excluding warmup/cooldown.',
-      parameters: {
-        type: 'object',
-        properties: {
-          laps: {
-            type: 'array',
-            description:
-              'Array of all workout laps (work + recovery), excluding warmup/cooldown',
-            items: {
-              type: 'object',
-              properties: {
-                distance: {
-                  type: 'number',
-                  description: 'Lap distance in meters',
-                },
-                moving_time: {
-                  type: 'number',
-                  description: 'Lap moving time in seconds',
-                },
-                average_speed: {
-                  type: 'number',
-                  description: 'Lap average speed in m/s',
-                },
-              },
-              required: ['distance', 'moving_time', 'average_speed'],
-            },
-          },
-        },
-        required: ['laps'],
-      },
-    },
-  },
-  {
-    type: 'function' as const,
-    function: {
       name: 'returnWorkoutResult',
       description:
         'Return the final structured workout analysis result after calling calculation functions. Must be called after exactly one calculation function.',
@@ -352,9 +273,9 @@ const tools = [
         properties: {
           type: {
             type: 'string',
-            enum: ['L', 'T', 'E', 'V', 'R'],
+            enum: ['L', 'T', 'E', 'V'],
             description:
-              'Workout type: L=Long, T=Tempo, E=Easy, V=VO2max, R=Repetitions',
+              'Workout type: L=Long, T=Tempo, E=Easy, V=VO2max',
           },
           structure: {
             type: 'string',
@@ -384,17 +305,6 @@ const tools = [
               average_heartrate: { type: 'number' },
             },
           },
-          repetition_metrics: {
-            type: 'object',
-            description: 'Metrics for repetition workouts (from calculation)',
-            properties: {
-              sets: { type: 'number' },
-              reps_per_set: { type: 'number' },
-              work_distance_meters: { type: 'number' },
-              recovery_distance_meters: { type: 'number' },
-              between_set_recovery_distance_meters: { type: 'number' },
-            },
-          },
         },
         required: ['type'],
       },
@@ -416,7 +326,6 @@ function isEasyRun(activity: Activity): boolean {
   // This is the key differentiator:
   // - Easy runs: all laps in zones 1-2
   // - Tempo runs: have laps in zones 3-4
-  // - Repetition runs: have laps in zones 5-6
   return activity.laps.every(
     (lap) => lap.pace_zone === 1 || lap.pace_zone === 2
   );
@@ -459,7 +368,7 @@ export async function analyzeWorkout(
     };
   }
 
-  // STEP 2: Use OpenAI for complex workouts (tempo, repetition, VO2max)
+  // STEP 2: Use OpenAI for complex workouts (tempo, VO2max)
   // These have laps in pace zones 3+ and need detailed analysis
   const messages: any[] = [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -506,9 +415,6 @@ ${JSON.stringify(activity)}`,
         functionResponse = JSON.stringify(calculationResult);
       } else if (functionName === 'calculateIntervalMetrics') {
         calculationResult = calculateIntervalMetrics(functionArgs);
-        functionResponse = JSON.stringify(calculationResult);
-      } else if (functionName === 'calculateRepetitionStructure') {
-        calculationResult = calculateRepetitionStructure(functionArgs);
         functionResponse = JSON.stringify(calculationResult);
       } else if (functionName === 'returnWorkoutResult') {
         // Final result function - return the structured result

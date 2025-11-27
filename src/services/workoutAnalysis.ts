@@ -77,11 +77,50 @@ Analysis:
 - ❌ DO NOT classify as Long Run (even though total is 7 miles)
 - ❌ DO NOT use overall activity stats (diluted by warmup/cooldown)
 
-⚡ INTERVAL TEMPO DETECTION - SECOND PRIORITY:
-- Look for: 900-1700m work intervals with <150m recoveries
-- Work intervals: HR 150+, pace zone 4
-- Recovery: <60 seconds, <150m
-- IF TRUE: Call calculateIntervalMetrics with work laps only, then returnWorkoutResult with type="T", structure="interval"
+⚡ CRUISE INTERVAL TEMPO DETECTION - FIRST PRIORITY (CHECK BEFORE CONTINUOUS):
+
+CRITICAL: Check for cruise intervals BEFORE checking for continuous tempo!
+
+CRUISE INTERVAL PATTERN (classic tempo workout):
+- Warmup lap(s): slow pace, HR <145
+- REPEATING PATTERN:
+  * Work interval: 900-1700m (typically 1 mile = 1609m), HR 155+, pace_zone 4, speed >4.0 m/s
+  * Short recovery: <200m, <90 seconds, any HR/pace (athlete stays moving)
+- Cooldown lap(s): slow pace, HR <145
+
+DETECTION ALGORITHM:
+1. Scan activity.laps to identify work intervals:
+   - Distance: 900-1700m (e.g., 1 mile intervals = 1609m)
+   - Heart rate: >=155 bpm
+   - Pace zone: 4 (or 3 if HR is high)
+   - Speed: >4.0 m/s
+2. Between each pair of work intervals, check for recovery lap:
+   - Distance: <200m
+   - Duration: <90 seconds
+   - (HR and pace don't matter - athlete keeps moving slowly)
+3. Count work intervals - must have 2 or more
+4. If pattern matches: Call calculateIntervalMetrics with ONLY work interval laps
+5. Return type="T", structure="interval"
+
+CONCRETE EXAMPLE - CRUISE INTERVALS (3 x 1 mile):
+Activity: 12991m (8 miles), 4113 seconds (68 min)
+Laps:
+  Lap 1: 3218m, HR 123, pace_zone 1 ← warmup
+  Lap 2: 1609m, HR 163, pace_zone 4, 383s ← WORK #1
+  Lap 3: 98m, HR 150, 60s ← recovery
+  Lap 4: 1609m, HR 169, pace_zone 4, 384s ← WORK #2
+  Lap 5: 99m, HR 159, 60s ← recovery
+  Lap 6: 1609m, HR 168, pace_zone 4, 382s ← WORK #3
+  Lap 7: 101m, HR 165, 60s ← recovery
+  Lap 8: 3218m, HR 128, pace_zone 1 ← cooldown
+
+Analysis:
+- Found 3 work intervals (laps 2, 4, 6): each 1609m, HR 160+, pace_zone 4
+- Recovery laps between (laps 3, 5, 7): each ~100m, 60s
+- CRITICAL: Pass ONLY work laps [lap2, lap4, lap6] to calculateIntervalMetrics
+- Expected output: "T 3 x 1 mi @ 6:24, 6:24, 6:23"
+- ❌ DO NOT classify as continuous tempo
+- ❌ DO NOT include warmup, cooldown, or recovery laps in metrics
 
 🏃 LONG RUN DETECTION - THIRD PRIORITY:
 
@@ -111,15 +150,15 @@ IF LONG RUN: Call calculateRunMetrics with overall stats, then returnWorkoutResu
 - Consistent pace, HR 115-145, max HR < 160
 - Call calculateRunMetrics with overall stats, then returnWorkoutResult with type="E"
 
-STEP 3: DECISION TREE (FOLLOW IN ORDER)
+STEP 3: DECISION TREE (FOLLOW IN ORDER - CRUISE INTERVALS FIRST!)
 
 START HERE:
-├─ Do laps show 2+ consecutive hard laps (HR>=150, speed>=3.5, distance>1000m)?
-│  ├─ YES → Extract tempo laps, call calculateTempoBlockMetrics, return type="T"
+├─ Do laps show CRUISE INTERVAL pattern (work intervals 900-1700m with <200m recoveries)?
+│  ├─ YES → Extract work laps only, call calculateIntervalMetrics, return type="T", structure="interval"
 │  └─ NO → Continue to next check
 │
-├─ Do laps show interval pattern (work intervals 900-1700m with short recoveries)?
-│  ├─ YES → Extract work laps, call calculateIntervalMetrics, return type="T"
+├─ Do laps show CONTINUOUS TEMPO pattern (2+ consecutive hard laps >1000m)?
+│  ├─ YES → Extract tempo laps, call calculateTempoBlockMetrics, return type="T", structure="continuous"
 │  └─ NO → Continue to next check
 │
 ├─ Is distance >= 10 miles OR time >= 90 minutes?

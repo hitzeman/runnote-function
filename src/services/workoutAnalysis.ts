@@ -12,18 +12,25 @@ import {
  */
 const SYSTEM_PROMPT = `You analyze running workouts from Strava activity data to classify and summarize them.
 
+⚠️ IMPORTANT CONTEXT:
+You are ONLY called for TEMPO workouts (workouts with laps in pace zones 3+).
+Easy and Long runs are detected FIRST using pace zones (all laps in zones 1-2) and NEVER reach you.
+Your job is to analyze TEMPO RUN STRUCTURE ONLY.
+
 You have access to calculator tools that perform accurate arithmetic. IMPORTANT: Call exactly ONE tool function, then return structured results.
 
 ⚠️ CRITICAL WORKFLOW:
 
 STEP 1: ANALYZE THE LAPS ARRAY FIRST
-Examine activity.laps to find workout patterns. DO NOT use overall average stats yet.
+Examine activity.laps to find tempo workout patterns. DO NOT use overall average stats yet.
 
-STEP 2: CHECK FOR TEMPO RUN PATTERN (DO THIS FIRST!)
+STEP 2: CHECK FOR CRUISE INTERVAL TEMPO FIRST (HIGHEST PRIORITY!)
 
-🚫 BLOCKER: Before classifying as Easy or Long run, you MUST check for tempo patterns!
+Since you ONLY receive tempo workouts, check for cruise intervals before continuous tempo.
 
-A TEMPO RUN has this structure:
+⚡ CONTINUOUS TEMPO DETECTION - SECOND PRIORITY:
+
+CONTINUOUS TEMPO RUN structure:
 - 1-2 warmup laps: slow pace (2.5-3.0 m/s), low HR (120-145)
 - TEMPO BLOCK: 2+ consecutive laps with ALL of:
   * Distance per lap: >1000m (e.g., 1600m = 1 mile)
@@ -33,7 +40,7 @@ A TEMPO RUN has this structure:
   * Total duration: 10-40 minutes
 - 1-2 cooldown laps: slower pace, HR drops
 
-TEMPO DETECTION ALGORITHM:
+CONTINUOUS TEMPO DETECTION ALGORITHM:
 1. Scan activity.laps array (NOT splits_metric or splits_standard) for consecutive "hard" laps
 2. Hard lap criteria: ALL of these must be true:
    - average_heartrate >= 150 bpm
@@ -122,50 +129,21 @@ Analysis:
 - ❌ DO NOT classify as continuous tempo
 - ❌ DO NOT include warmup, cooldown, or recovery laps in metrics
 
-🏃 LONG RUN DETECTION - THIRD PRIORITY:
+⚠️ FALLBACK CASE (should be rare):
+If you receive a workout that doesn't match cruise interval or continuous tempo patterns,
+it may have been misclassified. Analyze it as a tempo run anyway since you only receive
+workouts with laps in pace zones 3+.
 
-⚠️ CRITICAL CHECK FIRST: Did you find a tempo pattern above?
-- If ANY laps have HR >=150 with pace_zone 3 or 4 and distance >1000m → IT'S TEMPO, NOT LONG RUN
-- If you see warmup → hard laps → cooldown structure → IT'S TEMPO, NOT LONG RUN
-
-Only classify as Long Run if ALL conditions are true:
-1. NO tempo block found (no consecutive hard laps)
-2. NO interval pattern found
-3. Distance >= 16093.44 meters (10 miles) OR moving_time >= 5400 seconds (90 minutes)
-
-EXPLICIT NEGATIVE EXAMPLES (NOT LONG RUNS):
-❌ 11301m (7 mi) with laps showing tempo block → TEMPO, NOT Long Run
-❌ 12874m (8 mi) easy, consistent pace → EASY, NOT Long Run (< 10 miles)
-❌ 15000m (9.3 mi) in 70 min → EASY, NOT Long Run (< 10 miles AND < 90 min)
-
-POSITIVE EXAMPLES (ARE LONG RUNS):
-✅ 17703m (11 mi), easy pace, no hard laps → Long Run
-✅ 14484m (9 mi) in 96 minutes → Long Run (over 90 minutes)
-✅ 20921m (13 mi) in 2 hours → Long Run
-
-IF LONG RUN: Call calculateRunMetrics with overall stats, then returnWorkoutResult with type="L"
-
-🐢 EASY RUN DETECTION - FOURTH PRIORITY (fallback):
-- ONLY if no tempo or interval patterns found above
-- Consistent pace, HR 115-145, max HR < 160
-- Call calculateRunMetrics with overall stats, then returnWorkoutResult with type="E"
-
-STEP 3: DECISION TREE (FOLLOW IN ORDER - CRUISE INTERVALS FIRST!)
+STEP 3: DECISION TREE FOR TEMPO WORKOUTS (FOLLOW IN ORDER!)
 
 START HERE:
 ├─ Do laps show CRUISE INTERVAL pattern (work intervals 900-1700m with <200m recoveries)?
 │  ├─ YES → Extract work laps only, call calculateIntervalMetrics, return type="T", structure="interval"
 │  └─ NO → Continue to next check
 │
-├─ Do laps show CONTINUOUS TEMPO pattern (2+ consecutive hard laps >1000m)?
-│  ├─ YES → Extract tempo laps, call calculateTempoBlockMetrics, return type="T", structure="continuous"
-│  └─ NO → Continue to next check
-│
-├─ Is distance >= 10 miles OR time >= 90 minutes?
-│  ├─ YES → Call calculateRunMetrics, return type="L"
-│  └─ NO → It's an easy run
-│
-└─ Call calculateRunMetrics, return type="E"
+└─ Do laps show CONTINUOUS TEMPO pattern (2+ consecutive hard laps >1000m)?
+   ├─ YES → Extract tempo laps, call calculateTempoBlockMetrics, return type="T", structure="continuous"
+   └─ NO → Treat as continuous tempo with all hard laps (fallback)
 
 STEP 4: CALL ONE CALCULATOR FUNCTION
 Based on detected type above, call the appropriate function ONCE.
@@ -385,11 +363,17 @@ function isLongRun(activity: Activity): boolean {
 
 /**
  * Analyze a Strava activity and return structured workout classification
+ *
+ * PRIORITY ORDER:
+ * 1. Easy/Long Runs (all laps in pace zones 1-2) - NO AI, cost-effective
+ * 2. Tempo Runs (laps in zones 3+) - AI analysis:
+ *    a. Cruise Intervals (work intervals with short recoveries)
+ *    b. Continuous Tempo (sustained tempo block)
  */
 export async function analyzeWorkout(
   activity: Activity
 ): Promise<WorkoutAnalysisResult> {
-  // STEP 1: Check for easy run FIRST (most common, most cost-effective)
+  // STEP 1: Check for easy/long run FIRST (most common, most cost-effective, NO AI)
   // Easy runs have ALL laps in pace zones 1 or 2
   if (isEasyRun(activity)) {
     const metrics = calculateRunMetrics({

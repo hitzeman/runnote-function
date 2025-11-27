@@ -31,57 +31,52 @@ Since you ONLY receive tempo workouts, check for cruise intervals before continu
 ⚡ CONTINUOUS TEMPO DETECTION - SECOND PRIORITY:
 
 CONTINUOUS TEMPO RUN structure:
-- 1-2 warmup laps: slow pace (2.5-3.0 m/s), low HR (120-145)
+- 1-2 warmup laps: pace zone 1 or 2
 - TEMPO BLOCK: 2+ consecutive laps with ALL of:
   * Distance per lap: >1000m (e.g., 1600m = 1 mile)
-  * Heart rate: >=150 bpm
-  * Speed: >=3.5 m/s
   * Pace zone: 3 or 4
   * Total duration: 10-40 minutes
-- 1-2 cooldown laps: slower pace, HR drops
+- 1-2 cooldown laps: pace zone 1 or 2
 
 CONTINUOUS TEMPO DETECTION ALGORITHM:
 1. Scan activity.laps array (NOT splits_metric or splits_standard) for consecutive "hard" laps
 2. Hard lap criteria: ALL of these must be true:
-   - average_heartrate >= 150 bpm
-   - average_speed >= 3.5 m/s
-   - distance >= 1000m (this is for main tempo laps)
    - pace_zone is 3 or 4
+   - distance >= 1000m (this is for main tempo laps)
 3. Find the FIRST hard lap (this starts the tempo block)
 4. Find consecutive hard laps after it (these continue the tempo block)
-5. Check if there's a SHORT tail lap immediately after (<500m, same speed/HR) - include it!
+5. Check if there's a SHORT tail lap immediately after (<500m, same pace zone) - include it!
 6. All laps BEFORE the first hard lap = warmup (EXCLUDE)
 7. All laps AFTER the last hard/tail lap = cooldown (EXCLUDE)
 8. Extract ONLY the tempo laps (hard laps + tail lap if present)
 9. Call calculateTempoBlockMetrics with ONLY these laps
 10. Return type="T", structure="continuous"
 
-CONCRETE EXAMPLE - THIS IS A TEMPO RUN:
-Activity: 11301m (7 miles), 3334 seconds (55 min), avg HR 150
+CONCRETE EXAMPLE - CONTINUOUS TEMPO:
+Activity: 11301m (7 miles), 3334 seconds (55 min)
 Laps:
-  Lap 1: 1609m, 2.88 m/s, HR 130 ← warmup
-  Lap 2: 1609m, 2.88 m/s, HR 135 ← warmup
-  Lap 3: 1609m, 4.09 m/s, HR 160, pace_zone 4 ← TEMPO START
-  Lap 4: 1609m, 4.06 m/s, HR 169, pace_zone 3 ← TEMPO
-  Lap 5: 1609m, 4.08 m/s, HR 170, pace_zone 4 ← TEMPO
-  Lap 6: 200m,  4.08 m/s, HR 170, pace_zone 4 ← TEMPO END
-  Lap 7: 1609m, 3.05 m/s, HR 151 ← cooldown
-  Lap 8: 1445m, 3.17 m/s, HR 146 ← cooldown
+  Lap 1: 1609m, pace_zone 1 ← warmup
+  Lap 2: 1609m, pace_zone 2 ← warmup
+  Lap 3: 1609m, pace_zone 4 ← TEMPO START
+  Lap 4: 1609m, pace_zone 3 ← TEMPO
+  Lap 5: 1609m, pace_zone 4 ← TEMPO
+  Lap 6: 200m,  pace_zone 4 ← TEMPO END (short tail)
+  Lap 7: 1609m, pace_zone 2 ← cooldown
+  Lap 8: 1445m, pace_zone 1 ← cooldown
 
 Analysis:
 - Scan activity.laps array:
-  * Lap 1-2: HR <145, slow → WARMUP (exclude)
-  * Lap 3: 1609m, HR 160, pace_zone 4 → FIRST HARD LAP (include)
-  * Lap 4: 1609m, HR 169, pace_zone 3 → hard lap (include)
-  * Lap 5: 1609m, HR 170, pace_zone 4 → hard lap (include)
-  * Lap 6: 200m, HR 170, pace_zone 4 → short tail at same effort (include)
-  * Lap 7-8: HR drops, slower → COOLDOWN (exclude)
+  * Lap 1-2: pace_zone 1-2 → WARMUP (exclude)
+  * Lap 3: 1609m, pace_zone 4 → FIRST HARD LAP (include)
+  * Lap 4: 1609m, pace_zone 3 → hard lap (include)
+  * Lap 5: 1609m, pace_zone 4 → hard lap (include)
+  * Lap 6: 200m, pace_zone 4 → short tail at same effort (include)
+  * Lap 7-8: pace_zone 1-2 → COOLDOWN (exclude)
 - Tempo laps: [lap3, lap4, lap5, lap6] (indices 2, 3, 4, 5 in zero-indexed array)
 - CRITICAL: Pass these 4 lap objects to calculateTempoBlockMetrics
 - Tempo block totals: 1609 + 1609 + 1609 + 200 = 5027m (3.12 miles), 1232 seconds
 - Expected result: 3.1 miles at 6:36/mi pace
 - ❌ DO NOT include laps 1-2 (warmup) or laps 7-8 (cooldown)
-- ❌ DO NOT classify as Long Run (even though total is 7 miles)
 - ❌ DO NOT use overall activity stats (diluted by warmup/cooldown)
 
 ⚡ CRUISE INTERVAL TEMPO DETECTION - FIRST PRIORITY (CHECK BEFORE CONTINUOUS):
@@ -89,22 +84,20 @@ Analysis:
 CRITICAL: Check for cruise intervals BEFORE checking for continuous tempo!
 
 CRUISE INTERVAL PATTERN (classic tempo workout):
-- Warmup lap(s): slow pace, HR <145
+- Warmup lap(s): pace zone 1 or 2
 - REPEATING PATTERN:
-  * Work interval: 900-1700m (typically 1 mile = 1609m), HR 155+, pace_zone 4, speed >4.0 m/s
-  * Short recovery: <200m, <90 seconds, any HR/pace (athlete stays moving)
-- Cooldown lap(s): slow pace, HR <145
+  * Work interval: 900-1700m (typically 1 mile = 1609m), pace_zone 3 or 4
+  * Short recovery: <200m, <90 seconds, any pace zone (athlete stays moving)
+- Cooldown lap(s): pace zone 1 or 2
 
 DETECTION ALGORITHM:
 1. Scan activity.laps to identify work intervals:
    - Distance: 900-1700m (e.g., 1 mile intervals = 1609m)
-   - Heart rate: >=155 bpm
-   - Pace zone: 4 (or 3 if HR is high)
-   - Speed: >4.0 m/s
+   - Pace zone: 3 or 4
 2. Between each pair of work intervals, check for recovery lap:
    - Distance: <200m
    - Duration: <90 seconds
-   - (HR and pace don't matter - athlete keeps moving slowly)
+   - (pace zone doesn't matter - athlete keeps moving slowly)
 3. Count work intervals - must have 2 or more
 4. If pattern matches: Call calculateIntervalMetrics with ONLY work interval laps
 5. Return type="T", structure="interval"
@@ -112,17 +105,17 @@ DETECTION ALGORITHM:
 CONCRETE EXAMPLE - CRUISE INTERVALS (3 x 1 mile):
 Activity: 12991m (8 miles), 4113 seconds (68 min)
 Laps:
-  Lap 1: 3218m, HR 123, pace_zone 1 ← warmup
-  Lap 2: 1609m, HR 163, pace_zone 4, 383s ← WORK #1
-  Lap 3: 98m, HR 150, 60s ← recovery
-  Lap 4: 1609m, HR 169, pace_zone 4, 384s ← WORK #2
-  Lap 5: 99m, HR 159, 60s ← recovery
-  Lap 6: 1609m, HR 168, pace_zone 4, 382s ← WORK #3
-  Lap 7: 101m, HR 165, 60s ← recovery
-  Lap 8: 3218m, HR 128, pace_zone 1 ← cooldown
+  Lap 1: 3218m, pace_zone 1 ← warmup
+  Lap 2: 1609m, pace_zone 4, 383s ← WORK #1
+  Lap 3: 98m, 60s ← recovery
+  Lap 4: 1609m, pace_zone 4, 384s ← WORK #2
+  Lap 5: 99m, 60s ← recovery
+  Lap 6: 1609m, pace_zone 4, 382s ← WORK #3
+  Lap 7: 101m, 60s ← recovery
+  Lap 8: 3218m, pace_zone 1 ← cooldown
 
 Analysis:
-- Found 3 work intervals (laps 2, 4, 6): each 1609m, HR 160+, pace_zone 4
+- Found 3 work intervals (laps 2, 4, 6): each 1609m, pace_zone 4
 - Recovery laps between (laps 3, 5, 7): each ~100m, 60s
 - CRITICAL: Pass ONLY work laps [lap2, lap4, lap6] to calculateIntervalMetrics
 - Expected output: "T 3 x 1 mi @ 6:24, 6:24, 6:23"
@@ -152,13 +145,12 @@ STEP 5: RETURN RESULTS
 Call returnWorkoutResult with the structured output.
 
 ⚠️ COMMON MISTAKES TO AVOID:
-❌ DO NOT look at average_heartrate before checking laps
-❌ DO NOT ignore max_heartrate (high max_heartrate = intervals, even if avg is low)
-❌ DO NOT call multiple calculator functions
-❌ DO NOT skip lap analysis
+❌ DO NOT use overall activity stats - analyze lap-by-lap pace zones instead
+❌ DO NOT call multiple calculator functions - call exactly ONE
+❌ DO NOT skip lap analysis - pace zones in laps are the key to classification
 ❌ DO NOT use splits_metric or splits_standard - ONLY use activity.laps array
 ❌ DO NOT include warmup or cooldown laps in tempo calculations
-❌ DO NOT pass ALL laps to calculateTempoBlockMetrics - only pass the tempo laps
+❌ DO NOT pass ALL laps to calculateTempoBlockMetrics - only pass the tempo laps (zones 3-4)
 
 ⚠️ CRITICAL DATA SOURCE:
 - Always use: activity.laps (the manual lap array)

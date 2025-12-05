@@ -357,16 +357,33 @@ function isLongRun(activity: Activity): boolean {
  * Analyze a Strava activity and return structured workout classification
  *
  * PRIORITY ORDER:
- * 1. Easy/Long Runs (all laps in pace zones 1-2) - NO AI, cost-effective
- * 2. Tempo Runs (laps in zones 3+) - AI analysis:
+ * 1. Long Runs (>= 10 miles OR >= 90 minutes) - NO AI, highest priority regardless of pace
+ * 2. Easy Runs (all laps in pace zones 1-2) - NO AI, cost-effective
+ * 3. Tempo Runs (laps in zones 3+) - AI analysis:
  *    a. Cruise Intervals (work intervals with short recoveries)
  *    b. Continuous Tempo (sustained tempo block)
  */
 export async function analyzeWorkout(
   activity: Activity
 ): Promise<WorkoutAnalysisResult> {
-  // STEP 1: Check for easy/long run FIRST (most common, most cost-effective, NO AI)
-  // Easy runs have ALL laps in pace zones 1 or 2
+  // STEP 1: Check for LONG RUN FIRST (>= 10 miles OR >= 90 minutes)
+  // Long runs are classified as such regardless of pace zones
+  // This ensures that faster long runs (with some zone 3+ laps) are still classified as Long
+  if (isLongRun(activity)) {
+    const metrics = calculateRunMetrics({
+      distance_meters: activity.distance,
+      moving_time_seconds: activity.moving_time,
+      average_heartrate: activity.average_heartrate,
+    });
+
+    return {
+      type: 'L',
+      metrics: metrics,
+    };
+  }
+
+  // STEP 2: Check for easy run (all laps in pace zones 1 or 2)
+  // Easy runs are shorter runs at comfortable pace
   if (isEasyRun(activity)) {
     const metrics = calculateRunMetrics({
       distance_meters: activity.distance,
@@ -374,16 +391,13 @@ export async function analyzeWorkout(
       average_heartrate: activity.average_heartrate,
     });
 
-    // Distinguish between Long Run and Easy Run
-    const type = isLongRun(activity) ? 'L' : 'E';
-
     return {
-      type: type,
+      type: 'E',
       metrics: metrics,
     };
   }
 
-  // STEP 2: Use OpenAI for complex workouts (tempo, VO2max)
+  // STEP 3: Use OpenAI for complex workouts (tempo, VO2max)
   // These have laps in pace zones 3+ and need detailed analysis
   const messages: any[] = [
     { role: 'system', content: SYSTEM_PROMPT },

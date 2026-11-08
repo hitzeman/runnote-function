@@ -1,0 +1,13 @@
+# gitleaks config: default rules plus one documented allowlist entry.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secrets"
+# Strava `embed_token` values appear in raw activity exports that were
+# committed to src/data/ before fixtures were sanitized (they are still in
+# git history). They are per-activity tokens for Strava's public embed
+# widget, not API credentials. Current fixtures strip them; see
+# scripts/sanitize-fixture.mjs.
+regexTarget = "line"
+regexes = ['''"embed_token":\s*"[0-9a-f]{40}"''']

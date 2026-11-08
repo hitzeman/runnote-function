@@ -100,7 +100,10 @@ __queuestorage__
 __azurite_db*__.json
 
 # VS Code
-extensions.json
-launch.json
-settings.json
-tasks.json
+.vscode/extensions.json
+.vscode/launch.json
+.vscode/settings.json
+.vscode/tasks.json
+
+# Claude Code: personal overrides stay local; shared settings.json is committed
+.claude/settings.local.json

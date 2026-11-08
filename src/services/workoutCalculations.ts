@@ -7,8 +7,10 @@ import {
  * Helper to format pace from seconds per mile to MM:SS
  */
 export function formatPace(secondsPerMile: number): string {
-  const minutes = Math.floor(secondsPerMile / 60);
-  const seconds = Math.round(secondsPerMile % 60);
+  // Round to whole seconds first so 419.6s renders as 7:00, not 6:60.
+  const total = Math.round(secondsPerMile);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
@@ -19,7 +21,7 @@ export function formatPace(secondsPerMile: number): string {
 export function calculateRunMetrics(params: {
   distance_meters: number;
   moving_time_seconds: number;
-  average_heartrate: number;
+  average_heartrate?: number;
 }): BaseWorkoutMetrics {
   const distanceMiles = params.distance_meters / 1609.344;
   const secondsPerMile = params.moving_time_seconds / distanceMiles;
@@ -27,7 +29,10 @@ export function calculateRunMetrics(params: {
   return {
     distance_miles: distanceMiles,
     pace_seconds_per_mile: secondsPerMile,
-    average_heartrate: Math.round(params.average_heartrate),
+    average_heartrate:
+      params.average_heartrate === undefined
+        ? undefined
+        : Math.round(params.average_heartrate),
   };
 }
 

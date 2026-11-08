@@ -33,11 +33,13 @@ export async function getTokens(athleteId: string): Promise<TokenRow | null> {
   const t = table();
   try {
     await t.createTable();
-  } catch {}
+  } catch {
+    // Table already exists.
+  }
   try {
     const e = await t.getEntity<TokenRow>('athlete', athleteId);
     console.log(`[TokenStore] Retrieved tokens for athlete ${athleteId}`);
-    return e as TokenRow;
+    return e;
   } catch {
     console.log(`[TokenStore] No tokens found for athlete ${athleteId}`);
     return null;
@@ -48,7 +50,9 @@ export async function saveTokens(row: TokenRow): Promise<void> {
   const t = table();
   try {
     await t.createTable();
-  } catch {}
+  } catch {
+    // Table already exists.
+  }
   await t.upsertEntity(row, 'Replace');
   console.log(`[TokenStore] Saved tokens for athlete ${row.rowKey}, expires_at: ${row.expires_at}`);
 }

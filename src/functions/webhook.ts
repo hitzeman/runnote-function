@@ -20,6 +20,14 @@ import {
   formatWorkoutSummary,
 } from '../utils/activityFormatter';
 
+/** Strava webhook event payload (https://developers.strava.com/docs/webhooks/). */
+interface StravaWebhookEvent {
+  object_type: 'activity' | 'athlete';
+  aspect_type: 'create' | 'update' | 'delete';
+  object_id: number;
+  owner_id: number;
+}
+
 // Re-export for backward compatibility
 export { applyRunNoteToDescription as applyRunNoteTopLLMSafe };
 
@@ -91,84 +99,88 @@ async function withTokenRetry<T>(
  * - Ensures tokens remain valid and updates the Strava activity with AI-generated
  *   workout classification and summary.
  */
+export async function webhookHandler(
+  req: HttpRequest,
+  ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  // Strava verification (GET)
+  if (req.method === 'GET') {
+    const verify = req.query.get('hub.verify_token');
+    const challenge = req.query.get('hub.challenge');
+    if (verify !== process.env.VerifyToken) {
+      ctx.warn('Webhook verification failed: invalid verify token');
+      return { status: 403, body: 'Invalid verify token' };
+    }
+    ctx.log('Webhook verification successful');
+    return { status: 200, jsonBody: { 'hub.challenge': challenge } };
+  }
+
+  // Webhook event (POST)
+  try {
+    const body = (await req.json()) as Partial<StravaWebhookEvent> | null;
+
+    // Validate required webhook fields
+    if (!body?.object_type || !body?.aspect_type || !body?.object_id || !body?.owner_id) {
+      ctx.warn('Invalid webhook payload: missing required fields', body);
+      return { status: 200 }; // Still ACK to Strava
+    }
+
+    ctx.log(`Webhook received: ${body.object_type}/${body.aspect_type} - object_id: ${body.object_id}, owner_id: ${body.owner_id}`);
+
+    // Only handle "create" to start (add "update" later if you want)
+    if (body?.object_type !== 'activity' || body?.aspect_type !== 'create') {
+      ctx.log(`Ignoring ${body.object_type}/${body.aspect_type} event`);
+      return { status: 200 };
+    }
+
+    const activityId = String(body.object_id);
+    const athleteId = String(body.owner_id);
+
+    // Ensure tokens (refresh if expired)
+    let rec: TokenRow = await ensureValidTokens(athleteId);
+
+    // GET activity (retry if 401/403)
+    const { result: activity, tokenRow: updatedRec } = await withTokenRetry(
+      (token) => getActivity(activityId, token),
+      rec
+    );
+    rec = updatedRec;
+
+    // Analyze workout with AI
+    const workoutResult = await analyzeWorkout(activity);
+
+    // Create activity update payload
+    const updates = createActivityUpdate(activity.description, workoutResult);
+
+    // Check if anything needs updating. Easy runs leave `name` unset (the
+    // title is kept), so only compare the name when we intend to change it.
+    const descriptionChanged = updates.description !== activity.description;
+    const nameChanged =
+      updates.name !== undefined && updates.name !== activity.name;
+    if (descriptionChanged || nameChanged) {
+      const { tokenRow: finalRec } = await withTokenRetry(
+        (token) => updateActivity(activityId, updates, token),
+        rec
+      );
+      rec = finalRec;
+
+      ctx.log(
+        `Activity ${activityId} updated: ${workoutResult.type} - ${updates.name}`
+      );
+    } else {
+      ctx.log(`Activity ${activityId} - no updates needed`);
+    }
+
+    return { status: 200 };
+  } catch (err: unknown) {
+    const e = err as { response?: { data?: unknown }; message?: string };
+    ctx.error(e?.response?.data || e?.message || err);
+    return { status: 200 }; // always ACK Strava
+  }
+}
+
 app.http('webhook', {
   methods: ['GET', 'POST'],
   authLevel: 'anonymous',
-  handler: async (
-    req: HttpRequest,
-    ctx: InvocationContext
-  ): Promise<HttpResponseInit> => {
-    // Strava verification (GET)
-    if (req.method === 'GET') {
-      const verify = req.query.get('hub.verify_token');
-      const challenge = req.query.get('hub.challenge');
-      if (verify !== process.env.VerifyToken) {
-        ctx.warn('Webhook verification failed: invalid verify token');
-        return { status: 403, body: 'Invalid verify token' };
-      }
-      ctx.log('Webhook verification successful');
-      return { status: 200, jsonBody: { 'hub.challenge': challenge } };
-    }
-
-    // Webhook event (POST)
-    try {
-      const body = (await req.json()) as any;
-
-      // Validate required webhook fields
-      if (!body?.object_type || !body?.aspect_type || !body?.object_id || !body?.owner_id) {
-        ctx.warn('Invalid webhook payload: missing required fields', body);
-        return { status: 200 }; // Still ACK to Strava
-      }
-
-      ctx.log(`Webhook received: ${body.object_type}/${body.aspect_type} - object_id: ${body.object_id}, owner_id: ${body.owner_id}`);
-
-      // Only handle "create" to start (add "update" later if you want)
-      if (body?.object_type !== 'activity' || body?.aspect_type !== 'create') {
-        ctx.log(`Ignoring ${body.object_type}/${body.aspect_type} event`);
-        return { status: 200 };
-      }
-
-      const activityId = String(body.object_id);
-      const athleteId = String(body.owner_id);
-
-      // Ensure tokens (refresh if expired)
-      let rec: TokenRow = await ensureValidTokens(athleteId);
-
-      // GET activity (retry if 401/403)
-      const { result: activity, tokenRow: updatedRec } = await withTokenRetry(
-        (token) => getActivity(activityId, token),
-        rec
-      );
-      rec = updatedRec;
-
-      // Analyze workout with AI
-      const workoutResult = await analyzeWorkout(activity);
-
-      // Create activity update payload
-      const updates = createActivityUpdate(activity.description, workoutResult);
-
-      // Check if anything needs updating
-      if (
-        updates.description !== activity.description ||
-        updates.name !== activity.name
-      ) {
-        const { tokenRow: finalRec } = await withTokenRetry(
-          (token) => updateActivity(activityId, updates, token),
-          rec
-        );
-        rec = finalRec;
-
-        ctx.log(
-          `Activity ${activityId} updated: ${workoutResult.type} - ${updates.name}`
-        );
-      } else {
-        ctx.log(`Activity ${activityId} - no updates needed`);
-      }
-
-      return { status: 200 };
-    } catch (err: any) {
-      ctx.error(err?.response?.data || err.message);
-      return { status: 200 }; // always ACK Strava
-    }
-  },
+  handler: webhookHandler,
 });

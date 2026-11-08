@@ -30,10 +30,12 @@ export function formatWorkoutSummary(result: WorkoutAnalysisResult): string {
       .map((pace) => formatPace(pace))
       .join(', ');
 
+    // Compare after rounding to 0.1 mi: Strava records a mile lap as
+    // 1609.34 m (0.999997 mi), which must render as "1 mi", not "1.0 mi".
+    const repMiles =
+      Math.round(interval_metrics.distance_per_interval_miles * 10) / 10;
     const distance =
-      interval_metrics.distance_per_interval_miles < 1
-        ? `${interval_metrics.distance_per_interval_miles.toFixed(1)} mi`
-        : `${Math.round(interval_metrics.distance_per_interval_miles)} mi`;
+      repMiles < 1 ? `${repMiles.toFixed(1)} mi` : `${Math.round(repMiles)} mi`;
 
     return `${type} ${interval_metrics.interval_count} x ${distance} @ ${formattedPaces}`;
   }
@@ -46,24 +48,33 @@ export function formatWorkoutSummary(result: WorkoutAnalysisResult): string {
         : `${metrics.distance_miles.toFixed(1)} mi`;
 
     const pace = formatPace(metrics.pace_seconds_per_mile);
-    const hr = Math.round(metrics.average_heartrate);
-
     // Tempo runs show "avg" pace, others show HR
     if (type === 'T' && structure === 'continuous') {
       return `${type} ${distance} @ avg ${pace}/mi`;
-    } else {
-      return `${type} ${distance} @ ${pace}/mi (HR ${hr})`;
     }
+    // Activities recorded without a HR sensor have no average_heartrate;
+    // omit the HR suffix rather than printing "HR NaN".
+    if (metrics.average_heartrate === undefined) {
+      return `${type} ${distance} @ ${pace}/mi`;
+    }
+    const hr = Math.round(metrics.average_heartrate);
+    return `${type} ${distance} @ ${pace}/mi (HR ${hr})`;
   }
 
   // Fallback
   return `${type} run`;
 }
 
+// "--from RunNote" with tolerant spacing/case. Also accepts an em- or
+// en-dash in place of "--": real activity data contains "—from RunNote"
+// (probably text-input autocorrect after a manual edit).
+const MARKER_ANYWHERE = /\s*(?:--|\u2014|\u2013)\s*from\s*RunNote\s*/gi;
+const MARKER_AT_END = /\s*(?:--|\u2014|\u2013)\s*from\s*RunNote\s*$/i;
+
 /**
  * Apply RunNote summary to activity description
  * Ensures exactly one RunNote line at the top using the provided summary.
- * - Strips ANY existing line that ends with `--from RunNote` (case/space tolerant)
+ * - Strips ANY existing line that ends with `--from RunNote` (case/space/dash tolerant)
  * - Sanitizes the summary to a single line
  * - Preserves all other lines (e.g., COROS), in original order
  */
@@ -79,19 +90,17 @@ export function applyRunNoteToDescription(
 
   // Strip any existing "--from RunNote" markers from the summary (case-insensitive)
   // This prevents duplicate markers if the LLM includes them
-  summaryLine = summaryLine.replace(/\s*--\s*from\s*RunNote\s*/gi, '').trim();
+  summaryLine = summaryLine.replace(MARKER_ANYWHERE, '').trim();
 
   // Build the canonical RunNote line we want to appear once
   const runNoteLine = `${summaryLine} ${marker}`;
 
-  // Match any line that ends with the marker (allow varying spaces/case)
-  const endsWithMarker = new RegExp(`\\s*--\\s*from\\s*RunNote\\s*$`, 'i');
 
   // Keep every non-empty line that is NOT a previous RunNote line
   const kept = desc
     .split(/\n/)
     .map((l) => l.trimEnd())
-    .filter((l) => l.length > 0 && !endsWithMarker.test(l.trim()));
+    .filter((l) => l.length > 0 && !MARKER_AT_END.test(l.trim()));
 
   // Assemble final: canonical RunNote line on top, others below
   if (kept.length === 0) {

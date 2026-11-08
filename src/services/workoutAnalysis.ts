@@ -325,7 +325,7 @@ const tools = [
  * Check if activity is an easy run based on pace zones
  * Easy runs have ALL laps in pace zones 1 or 2
  */
-function isEasyRun(activity: Activity): boolean {
+export function isEasyRun(activity: Activity): boolean {
   // Must have laps data
   if (!activity.laps || activity.laps.length === 0) {
     return false;
@@ -343,7 +343,7 @@ function isEasyRun(activity: Activity): boolean {
 /**
  * Check if activity is a long run (>= 10 miles or >= 90 minutes)
  */
-function isLongRun(activity: Activity): boolean {
+export function isLongRun(activity: Activity): boolean {
   const TEN_MILES_METERS = 16093.44;
   const NINETY_MINUTES_SECONDS = 5400;
 

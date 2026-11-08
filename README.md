@@ -4,7 +4,7 @@
 
 ## Status
 
-**Paused** since TODO(Todd): month/year. Strava's API terms restrict passing Strava
+**Paused** since 06/2026. Strava's API terms restrict passing Strava
 data to AI/LLM models, and RunNote's tempo/interval classification does exactly that.
 The code stays up as a reference implementation and is not deployed.
 

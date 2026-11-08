@@ -147,8 +147,6 @@ describe('applyRunNoteToDescription', () => {
   // must end up with exactly one marker, and re-applying must be a no-op.
   const fixtureDescriptions = [...loadAll('easy'), ...loadAll('long'), ...loadAll('tempo')]
     .filter((a) => a.description)
-    // 16514624729 has an em-dash marker; covered separately below.
-    .filter((a) => a.id !== 16514624729)
     .map((a) => [a.id, a.description as string] as const);
 
   it.each(fixtureDescriptions)('fixture %s: exactly one marker, idempotent', (_id, desc) => {
@@ -158,10 +156,8 @@ describe('applyRunNoteToDescription', () => {
     expect(applyRunNoteToDescription(once, 'E 5.0 mi @ 8:00/mi (HR 140)')).toBe(once);
   });
 
-  // Known bug, fixed in a follow-up commit. Real Strava data contains an
-  // em-dash marker ("—from RunNote", e.g. from mobile autocorrect) which the
-  // marker regex does not recognise, so the old annotation survives.
-  it.fails('replaces an em-dash "—from RunNote" marker instead of keeping it', () => {
+  // Real Strava data (fixture 16514624729) contains "—from RunNote".
+  it('replaces an em-dash "—from RunNote" marker instead of keeping it', () => {
     const existing = '5k T avg 6:36/mi —from RunNote\n\n134 Training Load\n-- from COROS';
     expect(applyRunNoteToDescription(existing, 'T 3.1 mi @ avg 6:36/mi')).toBe(
       `T 3.1 mi @ avg 6:36/mi ${MARKER}\n\n134 Training Load\n-- from COROS`

@@ -15,8 +15,7 @@ describe('formatPace', () => {
     expect(formatPace(545.2)).toBe('9:05');
   });
 
-  // Known bug, fixed in a follow-up commit.
-  it.fails('carries into the next minute when seconds round up to 60', () => {
+  it('carries into the next minute when seconds round up to 60', () => {
     // 6:59.6 should display as 7:00, never 6:60.
     expect(formatPace(419.6)).toBe('7:00');
   });

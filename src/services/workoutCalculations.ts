@@ -7,8 +7,10 @@ import {
  * Helper to format pace from seconds per mile to MM:SS
  */
 export function formatPace(secondsPerMile: number): string {
-  const minutes = Math.floor(secondsPerMile / 60);
-  const seconds = Math.round(secondsPerMile % 60);
+  // Round to whole seconds first so 419.6s renders as 7:00, not 6:60.
+  const total = Math.round(secondsPerMile);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 

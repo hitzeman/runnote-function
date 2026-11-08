@@ -30,10 +30,12 @@ export function formatWorkoutSummary(result: WorkoutAnalysisResult): string {
       .map((pace) => formatPace(pace))
       .join(', ');
 
+    // Compare after rounding to 0.1 mi: Strava records a mile lap as
+    // 1609.34 m (0.999997 mi), which must render as "1 mi", not "1.0 mi".
+    const repMiles =
+      Math.round(interval_metrics.distance_per_interval_miles * 10) / 10;
     const distance =
-      interval_metrics.distance_per_interval_miles < 1
-        ? `${interval_metrics.distance_per_interval_miles.toFixed(1)} mi`
-        : `${Math.round(interval_metrics.distance_per_interval_miles)} mi`;
+      repMiles < 1 ? `${repMiles.toFixed(1)} mi` : `${Math.round(repMiles)} mi`;
 
     return `${type} ${interval_metrics.interval_count} x ${distance} @ ${formattedPaces}`;
   }

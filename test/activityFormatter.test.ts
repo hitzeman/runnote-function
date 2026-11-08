@@ -70,9 +70,8 @@ describe('formatWorkoutSummary', () => {
     ).toBe('T 2 x 0.6 mi @ 6:34, 6:30');
   });
 
-  // Known bug, fixed in a follow-up commit. Strava records a 1-mile lap as
-  // 1609.34 m, i.e. 0.999997 mi, which currently renders as "1.0 mi".
-  it.fails('renders Strava 1609.34 m reps as "1 mi"', () => {
+  // Strava records a 1-mile lap as 1609.34 m, i.e. 0.999997 mi.
+  it('renders Strava 1609.34 m reps as "1 mi"', () => {
     expect(
       formatWorkoutSummary({
         type: 'T',

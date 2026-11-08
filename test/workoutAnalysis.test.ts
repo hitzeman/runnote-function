@@ -145,7 +145,7 @@ describe('LLM path (tempo / intervals)', () => {
     expect(result.type).toBe('T');
     expect(result.structure).toBe('interval');
     expect(result.interval_metrics?.interval_count).toBe(3);
-    expect(formatWorkoutSummary(result)).toMatch(/^T 3 x .* @ 6:23, 6:24, 6:22$/);
+    expect(formatWorkoutSummary(result)).toBe('T 3 x 1 mi @ 6:23, 6:24, 6:22');
   });
 
   it('labels a non-interval fallback calculation as E (current behaviour)', async () => {

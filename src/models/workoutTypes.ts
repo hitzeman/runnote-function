@@ -14,7 +14,8 @@ export type TempoStructure = 'interval' | 'continuous';
 export interface BaseWorkoutMetrics {
   distance_miles: number;
   pace_seconds_per_mile: number;
-  average_heartrate: number;
+  /** Absent when the activity was recorded without a heart-rate sensor. */
+  average_heartrate?: number;
 }
 
 /**

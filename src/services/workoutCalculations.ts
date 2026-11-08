@@ -19,7 +19,7 @@ export function formatPace(secondsPerMile: number): string {
 export function calculateRunMetrics(params: {
   distance_meters: number;
   moving_time_seconds: number;
-  average_heartrate: number;
+  average_heartrate?: number;
 }): BaseWorkoutMetrics {
   const distanceMiles = params.distance_meters / 1609.344;
   const secondsPerMile = params.moving_time_seconds / distanceMiles;
@@ -27,7 +27,10 @@ export function calculateRunMetrics(params: {
   return {
     distance_miles: distanceMiles,
     pace_seconds_per_mile: secondsPerMile,
-    average_heartrate: Math.round(params.average_heartrate),
+    average_heartrate:
+      params.average_heartrate === undefined
+        ? undefined
+        : Math.round(params.average_heartrate),
   };
 }
 

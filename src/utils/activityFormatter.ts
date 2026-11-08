@@ -46,14 +46,17 @@ export function formatWorkoutSummary(result: WorkoutAnalysisResult): string {
         : `${metrics.distance_miles.toFixed(1)} mi`;
 
     const pace = formatPace(metrics.pace_seconds_per_mile);
-    const hr = Math.round(metrics.average_heartrate);
-
     // Tempo runs show "avg" pace, others show HR
     if (type === 'T' && structure === 'continuous') {
       return `${type} ${distance} @ avg ${pace}/mi`;
-    } else {
-      return `${type} ${distance} @ ${pace}/mi (HR ${hr})`;
     }
+    // Activities recorded without a HR sensor have no average_heartrate;
+    // omit the HR suffix rather than printing "HR NaN".
+    if (metrics.average_heartrate === undefined) {
+      return `${type} ${distance} @ ${pace}/mi`;
+    }
+    const hr = Math.round(metrics.average_heartrate);
+    return `${type} ${distance} @ ${pace}/mi (HR ${hr})`;
   }
 
   // Fallback

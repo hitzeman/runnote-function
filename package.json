@@ -1,14 +1,14 @@
 {
   "name": "runnote-function",
   "version": "1.0.0",
-  "description": "",
+  "description": "Azure Functions app that annotates Strava runs with a workout summary (paused; reference implementation).",
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
+    "build": "tsc -p tsconfig.build.json",
+    "watch": "tsc -p tsconfig.build.json -w",
     "clean": "rimraf dist",
     "prestart": "npm run clean && npm run build",
     "start": "func start",
-    "test": "echo \"No tests yet...\""
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@azure/data-tables": "^13.3.1",
@@ -17,9 +17,18 @@
     "openai": "^6.7.0"
   },
   "devDependencies": {
-    "@types/node": "^20.x",
-    "rimraf": "^5.0.0",
-    "typescript": "^4.0.0"
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.5",
+    "@vitest/coverage-v8": "^5.1.0",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
+    "rimraf": "^6.1.4",
+    "typescript": "~6.0",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.1.0"
   },
-  "main": "dist/src/{index.js,functions/*.js}"
+  "main": "dist/src/{index.js,functions/*.js}",
+  "engines": {
+    "node": ">=22.12"
+  }
 }

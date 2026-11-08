@@ -43,7 +43,9 @@ export async function saveState(state: string): Promise<void> {
   const t = stateTable();
   try {
     await t.createTable();
-  } catch {}
+  } catch {
+    // Table already exists.
+  }
 
   await t.upsertEntity(
     {
@@ -63,7 +65,9 @@ export async function validateAndConsumeState(state: string): Promise<boolean> {
   const t = stateTable();
   try {
     await t.createTable();
-  } catch {}
+  } catch {
+    // Table already exists.
+  }
 
   try {
     const entity = await t.getEntity<StateRow>('oauth', state);
@@ -93,7 +97,9 @@ export async function cleanupExpiredStates(): Promise<number> {
   const t = stateTable();
   try {
     await t.createTable();
-  } catch {}
+  } catch {
+    // Table already exists.
+  }
 
   const cutoff = Date.now() - 600000; // 10 minutes ago
   let deleted = 0;

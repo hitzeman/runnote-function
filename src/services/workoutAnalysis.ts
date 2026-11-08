@@ -1,5 +1,10 @@
 import { Activity } from '../models/activity.model';
-import { WorkoutAnalysisResult } from '../models/workoutTypes';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import {
+  BaseWorkoutMetrics,
+  IntervalWorkoutMetrics,
+  WorkoutAnalysisResult,
+} from '../models/workoutTypes';
 import { openai } from '../shared/ai';
 import {
   calculateRunMetrics,
@@ -399,7 +404,7 @@ export async function analyzeWorkout(
 
   // STEP 3: Use OpenAI for complex workouts (tempo, VO2max)
   // These have laps in pace zones 3+ and need detailed analysis
-  const messages: any[] = [
+  const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: SYSTEM_PROMPT },
     {
       role: 'user',
@@ -419,7 +424,8 @@ ${JSON.stringify(activity)}`,
     tool_choice: 'auto',
   });
 
-  let calculationResult: any = null;
+  let calculationResult: BaseWorkoutMetrics | IntervalWorkoutMetrics | null =
+    null;
 
   // Handle tool calls
   while (response.choices[0].finish_reason === 'tool_calls') {
@@ -431,19 +437,32 @@ ${JSON.stringify(activity)}`,
 
     // Execute each tool call
     for (const toolCall of toolCalls) {
-      const functionName = (toolCall as any).function.name;
-      const functionArgs = JSON.parse((toolCall as any).function.arguments);
+      // Only function tools are registered; anything else is "unknown".
+      const functionName =
+        toolCall.type === 'function' ? toolCall.function.name : undefined;
+      // Arguments are model-generated JSON matching the tool schemas above;
+      // they are trusted as-is (no runtime validation).
+      const functionArgs: unknown =
+        toolCall.type === 'function'
+          ? JSON.parse(toolCall.function.arguments)
+          : undefined;
 
       let functionResponse: string;
 
       if (functionName === 'calculateRunMetrics') {
-        calculationResult = calculateRunMetrics(functionArgs);
+        calculationResult = calculateRunMetrics(
+          functionArgs as Parameters<typeof calculateRunMetrics>[0]
+        );
         functionResponse = JSON.stringify(calculationResult);
       } else if (functionName === 'calculateTempoBlockMetrics') {
-        calculationResult = calculateTempoBlockMetrics(functionArgs);
+        calculationResult = calculateTempoBlockMetrics(
+          functionArgs as Parameters<typeof calculateTempoBlockMetrics>[0]
+        );
         functionResponse = JSON.stringify(calculationResult);
       } else if (functionName === 'calculateIntervalMetrics') {
-        calculationResult = calculateIntervalMetrics(functionArgs);
+        calculationResult = calculateIntervalMetrics(
+          functionArgs as Parameters<typeof calculateIntervalMetrics>[0]
+        );
         functionResponse = JSON.stringify(calculationResult);
       } else if (functionName === 'returnWorkoutResult') {
         // Final result function - return the structured result
@@ -455,7 +474,7 @@ ${JSON.stringify(activity)}`,
       // Add function response to messages
       messages.push({
         role: 'tool',
-        tool_call_id: (toolCall as any).id,
+        tool_call_id: toolCall.id,
         content: functionResponse,
       });
     }

@@ -57,6 +57,10 @@ app.http('authCallback', {
     }
 
     const token = await exchangeCodeForToken(code);
+    if (!token.athlete) {
+      ctx.error('Strava token response did not include an athlete');
+      return { status: 502, body: 'Unexpected response from Strava' };
+    }
     const athleteId = String(token.athlete.id);
 
     await saveTokens({

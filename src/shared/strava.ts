@@ -1,5 +1,14 @@
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 import { getTokens, saveTokens, TokenRow } from './tokenStore';
+import { Activity } from '../models/activity.model';
+
+/** Subset of Strava's POST /oauth/token response that RunNote uses. */
+export interface StravaTokenResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_at: number; // epoch seconds
+  athlete?: { id: number }; // present on authorization_code grants
+}
 
 function getEnv(name: string) {
   const v = process.env[name];
@@ -7,8 +16,10 @@ function getEnv(name: string) {
   return v;
 }
 
-export async function exchangeCodeForToken(code: string) {
-  const { data } = await axios.post(
+export async function exchangeCodeForToken(
+  code: string
+): Promise<StravaTokenResponse> {
+  const { data } = await axios.post<StravaTokenResponse>(
     'https://www.strava.com/api/v3/oauth/token',
     {
       client_id: getEnv('STRAVA_CLIENT_ID'),
@@ -22,7 +33,7 @@ export async function exchangeCodeForToken(code: string) {
 
 export async function refreshTokens(old: TokenRow): Promise<TokenRow> {
   console.log(`[Strava] Refreshing tokens for athlete ${old.rowKey}`);
-  const { data } = await axios.post(
+  const { data } = await axios.post<StravaTokenResponse>(
     'https://www.strava.com/api/v3/oauth/token',
     {
       client_id: getEnv('STRAVA_CLIENT_ID'),
@@ -58,8 +69,11 @@ export async function ensureValidTokens(athleteId: string): Promise<TokenRow> {
   return rec;
 }
 
-export async function getActivity(activityId: string, accessToken: string) {
-  const { data } = await axios.get(
+export async function getActivity(
+  activityId: string,
+  accessToken: string
+): Promise<Activity> {
+  const { data } = await axios.get<Activity>(
     `https://www.strava.com/api/v3/activities/${activityId}`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );

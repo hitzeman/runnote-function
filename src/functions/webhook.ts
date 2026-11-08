@@ -20,6 +20,14 @@ import {
   formatWorkoutSummary,
 } from '../utils/activityFormatter';
 
+/** Strava webhook event payload (https://developers.strava.com/docs/webhooks/). */
+interface StravaWebhookEvent {
+  object_type: 'activity' | 'athlete';
+  aspect_type: 'create' | 'update' | 'delete';
+  object_id: number;
+  owner_id: number;
+}
+
 // Re-export for backward compatibility
 export { applyRunNoteToDescription as applyRunNoteTopLLMSafe };
 
@@ -109,7 +117,7 @@ export async function webhookHandler(
 
   // Webhook event (POST)
   try {
-    const body = (await req.json()) as any;
+    const body = (await req.json()) as Partial<StravaWebhookEvent> | null;
 
     // Validate required webhook fields
     if (!body?.object_type || !body?.aspect_type || !body?.object_id || !body?.owner_id) {
@@ -164,8 +172,9 @@ export async function webhookHandler(
     }
 
     return { status: 200 };
-  } catch (err: any) {
-    ctx.error(err?.response?.data || err.message);
+  } catch (err: unknown) {
+    const e = err as { response?: { data?: unknown }; message?: string };
+    ctx.error(e?.response?.data || e?.message || err);
     return { status: 200 }; // always ACK Strava
   }
 }

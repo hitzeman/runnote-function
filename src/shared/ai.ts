@@ -12,10 +12,10 @@ function getOpenAIClient(): OpenAI {
 let _openai: OpenAI | null = null;
 
 export const openai = new Proxy({} as OpenAI, {
-  get(target, prop) {
+  get(_target, prop) {
     if (!_openai) {
       _openai = getOpenAIClient();
     }
-    return (_openai as any)[prop];
+    return (_openai as unknown as Record<PropertyKey, unknown>)[prop];
   },
 });

@@ -33,7 +33,7 @@ const ctx = () =>
     error: ReturnType<typeof vi.fn>;
   };
 const post = (body: unknown) =>
-  ({ method: 'POST', query: new URLSearchParams(), json: async () => body }) as unknown as HttpRequest;
+  ({ method: 'POST', query: new URLSearchParams(), json: () => Promise.resolve(body) }) as unknown as HttpRequest;
 const get = (params: Record<string, string>) =>
   ({ method: 'GET', query: new URLSearchParams(params) }) as unknown as HttpRequest;
 const createEvent = { object_type: 'activity', aspect_type: 'create', object_id: 123, owner_id: 42 };

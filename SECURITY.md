@@ -29,6 +29,11 @@ This document outlines the security measures implemented in RunNote to protect u
 - Logs all webhook events for monitoring and auditing
 - Returns 200 to Strava even for invalid payloads (to prevent retries)
 
+**Limitation:** Strava does not sign webhook POSTs, so field validation checks the
+payload's shape but does not authenticate the sender. A forged event can make RunNote
+fetch, classify (possibly costing an OpenAI call) and re-annotate an activity of an
+athlete who has already connected.
+
 **Files:**
 - `src/functions/webhook.ts` - Enhanced webhook validation and logging
 
@@ -142,7 +147,7 @@ If you suspect a security breach:
 
 ## Reporting Security Issues
 
-If you discover a security vulnerability, please email [your-email] instead of creating a public GitHub issue.
+If you discover a security vulnerability, please email TODO(Todd): contact address, instead of creating a public GitHub issue.
 
 ## References
 

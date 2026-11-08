@@ -1,19 +1,36 @@
 # RunNote
 
-An Azure Functions application that automatically analyzes Strava running activities and updates their descriptions with AI-generated workout summaries.
+[![CI](https://github.com/hitzeman/runnote-function/actions/workflows/ci.yml/badge.svg)](https://github.com/hitzeman/runnote-function/actions/workflows/ci.yml)
+
+## Status
+
+**Paused** since TODO(Todd): month/year. Strava's API terms restrict passing Strava
+data to AI/LLM models, and RunNote's tempo/interval classification does exactly that.
+The code stays up as a reference implementation and is not deployed.
+
+The repo also serves as a worked example of an agent harness. [HARNESS.md](./HARNESS.md)
+covers the instructions, hooks, skills and CI gates, and [AGENTS.md](./AGENTS.md) has
+the conventions agents follow here.
+
+---
+
+An Azure Functions application that analyzes Strava running activities and prepends a
+one-line workout summary to their descriptions.
 
 ## Features
 
-- **Automatic Workout Classification**: Uses OpenAI GPT-4o-mini to identify workout types (Tempo runs, Easy runs, etc.) from Strava lap data
-- **Smart Description Updates**: Prepends AI-generated summaries to activity descriptions without overwriting existing content
-- **Strava OAuth Integration**: Secure authentication flow with token management and automatic refresh
-- **Webhook Event Processing**: Real-time processing of Strava activity creation events
-- **Heart Rate Zone Analysis**: Classifies workouts based on sustained HR zones and pace data
-- **Idempotent Updates**: Safely manages activity descriptions, ensuring only one RunNote annotation exists
+- **Workout classification**: Long and Easy runs are detected with deterministic rules
+  (distance/time and lap pace zones). Other runs go to OpenAI `gpt-4o-mini`, which picks
+  the work laps and calls local calculator functions for the arithmetic.
+- **Description updates**: prepends the summary and keeps existing content (e.g. COROS
+  lines). Exactly one `--from RunNote` line is kept, so re-processing doesn't stack summaries.
+- **Strava OAuth**: authorization flow with CSRF `state`, token storage in Azure Table
+  Storage, and refresh with a 60-second expiry skew.
+- **Webhook processing**: handles Strava `activity`/`create` events.
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) (v20.x or higher recommended)
+- [Node.js](https://nodejs.org/) 22.12 or later (see `.nvmrc`)
 - [Azure Functions Core Tools](https://learn.microsoft.com/en-us/azure/azure-functions/functions-run-local) v4
 - [Azure Storage Emulator](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite) (Azurite) for local development
 - Strava API application ([create one here](https://www.strava.com/settings/api))
@@ -81,6 +98,12 @@ An Azure Functions application that automatically analyzes Strava running activi
 ### Development
 
 ```bash
+# Full pre-review gate: lint + strict typecheck + unit tests (what CI runs)
+npm run check
+
+# Tests only (offline; Strava and OpenAI are mocked)
+npm test
+
 # Build TypeScript to JavaScript
 npm run build
 
@@ -134,23 +157,24 @@ npm run prestart && npm start
 
 **`src/functions/webhook.ts`**:
 - Main webhook handler with GET (verification) and POST (event processing)
-- `getRunNoteSummaryFromOpenAI()`: Analyzes activity laps using GPT-4o-mini
-- `applyRunNoteTopLLMSafe()`: Safely manages activity descriptions with RunNote markers
-- `calculateTempoBlockMetrics()`: Calculates metrics for tempo run blocks
+- Fetches the activity, classifies it, and updates description/title only if something changed
 
-### AI Workout Classification
+**`src/services/workoutAnalysis.ts`** / **`workoutCalculations.ts`** / **`src/utils/activityFormatter.ts`**:
+- Classification, arithmetic, and summary/description formatting (see below)
 
-The app uses a two-stage detection system:
+### Workout Classification
 
-**Tempo Run Detection:**
-- Analyzes lap data for contiguous workout blocks
-- Requires: sustained HR 150+ bpm, pace zones 3-4, duration 15-40 minutes
-- Output format: `T 3.1 mi @ avg 6:38/mi`
+Checked in this order (`analyzeWorkout`):
 
-**Easy Run Detection:**
-- Identifies runs without sustained workout blocks
-- Looks for: HR zones 1-2 (115-145 bpm), consistent pace
-- Output format: `E 11 mi @ 8:59/mi (HR 130)`
+| Type | Rule | Uses LLM | Example output |
+|---|---|---|---|
+| Long (`L`) | ≥ 10 mi or ≥ 90 min moving time | No | `L 10 mi @ 7:39/mi (HR 155)` |
+| Easy (`E`) | every lap in Strava pace zone 1–2 | No | `E 8.1 mi @ 8:44/mi (HR 137)` |
+| Tempo (`T`) | otherwise; the model finds the continuous block or cruise intervals | Yes | `T 3.1 mi @ avg 6:38/mi`, `T 3 x 1 mi @ 6:23, 6:24, 6:22` |
+
+For the LLM path the model only picks laps. Distance, pace and HR are computed by
+`workoutCalculations.ts` through function calling. Long and non-easy runs are also
+retitled (`Long Run`, `Tempo Run`); easy runs keep their title.
 
 ### API Endpoints
 
@@ -166,7 +190,8 @@ The app uses a two-stage detection system:
 - **Runtime**: Node.js with TypeScript
 - **Serverless Framework**: Azure Functions v4
 - **Storage**: Azure Table Storage
-- **AI**: OpenAI GPT-4o-mini
+- **AI**: OpenAI `gpt-4o-mini` (function calling)
+- **Quality**: Vitest, ESLint (typescript-eslint), strict `tsc`, GitHub Actions, gitleaks
 - **APIs**: Strava API v3, OpenAI API
 - **HTTP Client**: Axios
 
@@ -192,7 +217,7 @@ See [package.json](./package.json) for the complete list.
 
 1. Create a feature branch
 2. Make your changes
-3. Build and test locally: `npm run build && npm start`
+3. Run `npm run check` (CI runs the same gate plus build, `npm audit` and a secret scan)
 4. Commit with descriptive messages
 5. Create a pull request to `main`
 
@@ -226,4 +251,5 @@ To deploy to Azure:
 
 ## License
 
+<!-- TODO(Todd): choose a license for the public repo (e.g. MIT) and add a LICENSE file; the line below is out of date. -->
 This project is private and proprietary.

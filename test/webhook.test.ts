@@ -110,9 +110,7 @@ describe('POST event handling', () => {
     expect(strava.updateActivity).not.toHaveBeenCalled();
   });
 
-  // Known bug, fixed in a follow-up commit: easy runs never set `name`, so
-  // `updates.name !== activity.name` is always true and the PUT always fires.
-  it.fails('does not re-send an easy run that is already annotated', async () => {
+  it('does not re-send an easy run that is already annotated', async () => {
     strava.getActivity.mockResolvedValue(loadActivity('easy', 16504177112));
     await webhookHandler(post(createEvent), ctx());
     expect(strava.updateActivity).not.toHaveBeenCalled();

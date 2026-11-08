@@ -144,11 +144,12 @@ export async function webhookHandler(
     // Create activity update payload
     const updates = createActivityUpdate(activity.description, workoutResult);
 
-    // Check if anything needs updating
-    if (
-      updates.description !== activity.description ||
-      updates.name !== activity.name
-    ) {
+    // Check if anything needs updating. Easy runs leave `name` unset (the
+    // title is kept), so only compare the name when we intend to change it.
+    const descriptionChanged = updates.description !== activity.description;
+    const nameChanged =
+      updates.name !== undefined && updates.name !== activity.name;
+    if (descriptionChanged || nameChanged) {
       const { tokenRow: finalRec } = await withTokenRetry(
         (token) => updateActivity(activityId, updates, token),
         rec
